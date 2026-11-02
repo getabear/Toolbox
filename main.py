@@ -28,6 +28,7 @@ except ImportError:
     HAS_CTK = False
 
 from core import EnvManager, Registry, SearchEngine, Manifest, human_size
+from core.env_manager import default_root as main_env_default_root
 
 ACCENT = "#4f8cff"
 
@@ -300,6 +301,17 @@ if HAS_CTK:
                 ctk.CTkLabel(info, text=v, anchor="w", font=ctk.CTkFont(size=12)).grid(row=i, column=1, sticky="w", padx=8, pady=6)
             info.grid_columnconfigure(1, weight=1)
 
+            # 更改数据目录
+            chg = ctk.CTkFrame(info, fg_color="transparent")
+            chg.grid(row=len(rows), column=0, columnspan=2, sticky="w", padx=10, pady=(4, 10))
+            ctk.CTkButton(chg, text="📁 更改数据目录…", width=150,
+                          command=self._change_data_root).pack(side="left", padx=6)
+            ctk.CTkButton(chg, text="恢复默认位置", width=110, fg_color="#2a2f3a",
+                          hover_color="#3a4150",
+                          command=lambda: self._apply_new_root(main_env_default_root())).pack(side="left", padx=6)
+            ctk.CTkLabel(chg, text="更改后旧数据自动搬迁(可跨盘)", font=ctk.CTkFont(size=11),
+                         text_color="#5c6474").pack(side="left", padx=10)
+
             table = ctk.CTkFrame(self.content, corner_radius=12, fg_color="#1e222c")
             table.grid(row=2, column=0, sticky="nsew", columnspan=2)
             self.content.grid_rowconfigure(2, weight=1)
@@ -325,6 +337,32 @@ if HAS_CTK:
         def _clear_cache(self, app_id: str):
             freed = self.env.environment_for(app_id).clear_cache()
             self._toast(f"{app_id} 缓存已清理,释放 {human_size(freed)}")
+            self._show_env_page()
+
+        # ---------- 更改数据目录 ----------
+        def _change_data_root(self):
+            from tkinter import filedialog, messagebox
+            path = filedialog.askdirectory(title="选择新的数据目录",
+                                           initialdir=str(self.env.root.parent))
+            if not path:
+                return
+            if not messagebox.askyesno("确认更改",
+                                       f"数据目录将更改为:\n{path}\n\n旧数据会自动搬迁过去,继续吗?"):
+                return
+            self._apply_new_root(path)
+
+        def _apply_new_root(self, new_root):
+            from pathlib import Path
+            try:
+                self.env.change_root(new_root)
+            except OSError as e:
+                self._toast(f"❌ {e}")
+                return
+            # 重建注册表与搜索引擎(指向新 root)
+            self.registry = Registry(self.env)
+            seed_registry(self.registry)
+            self.search_engine.update(self.registry.all())
+            self._toast(f"✅ 数据目录已更改为 {Path(new_root)}")
             self._show_env_page()
 
         def _remove_data(self, app_id: str):

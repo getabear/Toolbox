@@ -38,6 +38,32 @@ def default_root() -> Path:
     return Path(base) / APP_NAME
 
 
+def _pointer_file() -> Path:
+    """指针文件:记录用户自定义的数据根目录位置(始终放在平台默认位置)。"""
+    return default_root() / "root.json"
+
+
+def resolve_root() -> Path:
+    """读取指针文件决定实际数据根目录;无指针时用平台默认位置。"""
+    pf = _pointer_file()
+    if pf.exists():
+        try:
+            p = Path(json.loads(pf.read_text("utf-8"))["root"])
+            if p.exists() or _safe_mkdir(p):
+                return p
+        except (json.JSONDecodeError, OSError, KeyError):
+            pass
+    return default_root()
+
+
+def _safe_mkdir(p: Path) -> bool:
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+        return True
+    except OSError:
+        return False
+
+
 class AppEnvironment:
     """单个 App 的受管环境句柄。App 代码只能拿到这个,拿不到全局路径。"""
 
@@ -127,10 +153,41 @@ class EnvManager:
     _instance: "EnvManager | None" = None
 
     def __init__(self, root: Path | str | None = None):
-        self.root = Path(root) if root else default_root()
+        self.root = Path(root) if root else resolve_root()
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "apps").mkdir(exist_ok=True)
         EnvManager._instance = self
+
+    def change_root(self, new_root: Path | str, migrate: bool = True) -> Path:
+        """更改数据根目录;migrate=True 时把旧数据整体搬迁过去。
+
+        通过指针文件记录新位置,下次启动自动生效。
+        返回新的 root。跨盘搬迁用逐文件复制,失败时回滚(删除已复制内容)。
+        """
+        new_root = Path(new_root).expanduser().resolve()
+        if new_root == self.root.resolve():
+            return self.root
+        old_root = self.root
+        if migrate and old_root.exists():
+            try:
+                shutil.copytree(old_root, new_root, dirs_exist_ok=True,
+                                ignore=shutil.ignore_patterns("root.json"))
+            except OSError as e:
+                shutil.rmtree(new_root, ignore_errors=True)
+                raise OSError(f"数据搬迁失败,目录未更改: {e}") from e
+        else:
+            new_root.mkdir(parents=True, exist_ok=True)
+
+        # 写指针文件(放在平台默认位置,启动时被 resolve_root 读取)
+        pf = _pointer_file()
+        pf.parent.mkdir(parents=True, exist_ok=True)
+        tmp = pf.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"root": str(new_root)}, ensure_ascii=False), "utf-8")
+        tmp.replace(pf)
+
+        self.root = new_root
+        (new_root / "apps").mkdir(exist_ok=True)
+        return new_root
 
     @classmethod
     def instance(cls) -> "EnvManager":
