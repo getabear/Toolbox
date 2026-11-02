@@ -1,0 +1,88 @@
+158 INFO: PyInstaller: 6.22.3, contrib hooks: 2026.9
+158 INFO: Python: 3.11.0
+167 INFO: Platform: Windows-10-10.0.22631-SP0
+167 INFO: Python environment: D:\Code\toolbox\toolbox\.venv
+168 INFO: wrote D:\Code\toolbox\toolbox\Toolbox.spec
+924 INFO: Module search paths (PYTHONPATH):
+['D:\\Code\\toolbox\\toolbox\\.venv\\Scripts\\pyinstaller.exe',
+ 'C:\\Users\\bear\\AppData\\Local\\Programs\\Python\\Python311\\python311.zip',
+ 'C:\\Users\\bear\\AppData\\Local\\Programs\\Python\\Python311\\DLLs',
+ 'C:\\Users\\bear\\AppData\\Local\\Programs\\Python\\Python311\\Lib',
+ 'C:\\Users\\bear\\AppData\\Local\\Programs\\Python\\Python311',
+ 'D:\\Code\\toolbox\\toolbox\\.venv',
+ 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages',
+ 'D:\\Code\\toolbox\\toolbox']
+1461 INFO: Appending 'datas' from .spec
+1475 INFO: checking Analysis
+1504 INFO: Building because D:\Code\toolbox\toolbox\main.py changed
+1504 INFO: Looking for Python shared library...
+1504 INFO: Using Python shared library: C:\Users\bear\AppData\Local\Programs\Python\Python311\python311.dll
+1504 INFO: Running Analysis Analysis-00.toc
+1504 INFO: Target bytecode optimization level: 0
+1504 INFO: Initializing module dependency graph...
+1508 INFO: Initializing module graph hook caches...
+1528 INFO: Analyzing modules for base_library.zip ...
+3395 INFO: Processing standard module hook 'hook-heapq.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+3486 INFO: Processing standard module hook 'hook-encodings.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+4860 INFO: Processing standard module hook 'hook-math.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+4932 INFO: Processing standard module hook 'hook-pickle.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+6099 INFO: Caching module dependency graph...
+6130 INFO: Analyzing D:\Code\toolbox\toolbox\main.py
+6145 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+6146 INFO: TclTkInfo: initializing cached Tcl/Tk info...
+6478 INFO: Processing standard module hook 'hook-_tkinter.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+6494 INFO: Processing standard module hook 'hook-customtkinter.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+6670 INFO: Processing standard module hook 'hook-platform.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+6684 INFO: Processing standard module hook 'hook-_ctypes.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+6687 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+6688 INFO: SetuptoolsInfo: initializing cached setuptools info...
+7248 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+7458 INFO: Processing standard module hook 'hook-PIL.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+7531 INFO: Processing standard module hook 'hook-PIL.Image.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+7910 INFO: Processing standard module hook 'hook-numpy.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+8315 INFO: Processing standard module hook 'hook-difflib.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+8442 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+8622 INFO: Processing standard module hook 'hook-xml.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+9345 INFO: Processing standard module hook 'hook-sysconfig.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+9788 INFO: Processing standard module hook 'hook-webbrowser.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+10830 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+10991 INFO: Processing standard module hook 'hook-PIL.ImageFilter.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+11456 INFO: Analyzing hidden import 'sounddevice'
+11506 INFO: Processing standard module hook 'hook-sounddevice.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+11514 INFO: Processing module hooks (post-graph stage)...
+11714 INFO: Processing standard module hook 'hook-PIL.SpiderImagePlugin.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+11787 INFO: Processing standard module hook 'hook-_tkinter.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+11797 INFO: Performing binary vs. data reclassification (993 entries)
+11983 INFO: Looking for ctypes DLLs
+12001 WARNING: Ignoring AppKit.framework/AppKit imported from D:\Code\toolbox\toolbox\.venv\Lib\site-packages\darkdetect\_mac_detect.py - only basenames are supported with ctypes imports!
+12059 INFO: Analyzing run-time hooks ...
+12062 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+12064 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+12066 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+12068 INFO: Including run-time hook 'pyi_rth__tkinter.py' from 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+12095 INFO: Creating base_library.zip...
+12111 INFO: Looking for dynamic libraries
+12755 INFO: Extra DLL search directories (AddDllDirectory): ['D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\numpy.libs', 'D:\\Code\\toolbox\\toolbox\\.venv\\Lib\\site-packages\\rapidfuzz.libs']
+12755 INFO: Extra DLL search directories (PATH): []
+13868 INFO: Warnings written to D:\Code\toolbox\toolbox\build\Toolbox\warn-Toolbox.txt
+13927 INFO: Graph cross-reference written to D:\Code\toolbox\toolbox\build\Toolbox\xref-Toolbox.html
+13962 INFO: checking PYZ
+13977 INFO: Building because D:\Code\toolbox\toolbox\core\env_manager.py changed
+13977 INFO: Building PYZ (ZlibArchive) D:\Code\toolbox\toolbox\build\Toolbox\PYZ-00.pyz
+14459 INFO: Building PYZ (ZlibArchive) D:\Code\toolbox\toolbox\build\Toolbox\PYZ-00.pyz completed successfully.
+14482 INFO: checking PKG
+14493 INFO: Building because toc changed
+14493 INFO: Building PKG (CArchive) Toolbox.pkg
+20978 INFO: Building PKG (CArchive) Toolbox.pkg completed successfully.
+20998 INFO: Bootloader D:\Code\toolbox\toolbox\.venv\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+20998 INFO: checking EXE
+21008 INFO: Building because toc changed
+21008 INFO: Building EXE from EXE-00.toc
+21011 INFO: Copying bootloader EXE to D:\Code\toolbox\toolbox\dist\Toolbox.exe
+21015 INFO: Copying icon to EXE
+21019 INFO: Copying 0 resources to EXE
+21019 INFO: Embedding manifest in EXE
+21022 INFO: Appending PKG archive to EXE
+21042 INFO: Fixing EXE headers
+21193 INFO: Building EXE from EXE-00.toc completed successfully.
+21209 INFO: Build complete! The results are available in: D:\Code\toolbox\toolbox\dist

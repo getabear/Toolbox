@@ -14,6 +14,7 @@ Windows 运行:  python main.py
 """
 from __future__ import annotations
 
+import os
 import sys
 import tkinter as tk
 from pathlib import Path
@@ -71,7 +72,8 @@ BUILTIN_APPS: list[dict] = [
 ]
 
 
-def seed_registry(reg: Registry) -> None:
+def seed_registry(reg: Registry) -> dict:
+    """注册内置工具 + 同步外部插件。返回插件扫描结果(含 errors)。"""
     existing = {m.id for m in reg.all()}
     for d in BUILTIN_APPS:
         if d["id"] not in existing:
@@ -79,6 +81,64 @@ def seed_registry(reg: Registry) -> None:
                 reg.register(Manifest.from_dict(d))
             except Exception as e:
                 print(f"[warn] 注册 {d['id']} 失败: {e}")
+    return reg.sync_plugins()
+
+
+# 插件模板(「生成插件模板」按钮写入插件目录,新手照着改即可)
+PLUGIN_TEMPLATE = '''# -*- coding: utf-8 -*-
+"""Toolbox 插件示例:掷骰子。复制此文件到插件目录,改成你自己的工具。"""
+import random
+import tkinter as tk
+import customtkinter as ctk
+
+# ① 元数据:id 全局唯一(小写字母/数字/下划线),description 写清楚功能(搜索靠它)
+MANIFEST = {
+    "id": "hello_dice",
+    "name": "掷骰子",
+    "version": "1.0.0",
+    "description": "示例插件:点击按钮随机掷骰子,演示如何开发 Toolbox 第三方工具。",
+    "category": "示例",
+    "icon": "🎲",
+    "keywords": ["骰子", "随机", "示例", "dice"],
+    "class_name": "HelloPlugin",
+}
+
+# ② 工具类:必须继承 ToolApp。打包环境下用 try 导入兜底。
+try:
+    from core.base_app import ToolApp
+except ImportError:  # 开发调试时
+    class ToolApp:
+        def __init__(self, manifest, env):
+            self.manifest, self.env = manifest, env
+
+class HelloPlugin(ToolApp):
+    def build(self, root):
+        """root 是你的界面容器,随意布局。"""
+        frame = ctk.CTkFrame(root, fg_color="transparent")
+        frame.pack(fill="both", expand=True, padx=16, pady=16)
+
+        self.result = ctk.CTkLabel(frame, text="🎲", font=ctk.CTkFont(size=64))
+        self.result.pack(pady=20)
+
+        # ③ 数据存取:一律走 self.env(受管沙箱),别写死路径
+        cfg = self.env.get_config({"rolls": 0})
+        self.count = ctk.CTkLabel(frame, text=f"历史掷骰 {cfg.get(\'rolls\', 0)} 次",
+                                  text_color="#8a93a6")
+        self.count.pack()
+
+        def roll():
+            n = random.randint(1, 6)
+            self.result.configure(text=["⚀","⚁","⚂","⚃","⚄","⚅"][n-1])
+            cfg["rolls"] = cfg.get("rolls", 0) + 1
+            self.env.save_config(cfg)
+            self.count.configure(text=f"历史掷骰 {cfg[\'rolls\']} 次")
+
+        ctk.CTkButton(frame, text="掷!", width=120, height=38, command=roll).pack(pady=12)
+
+    def on_close(self):
+        """可选:窗口关闭时清理/保存。"""
+        pass
+'''
 
 
 if HAS_CTK:
@@ -93,8 +153,9 @@ if HAS_CTK:
 
             self.env = EnvManager.instance()
             self.registry = Registry(self.env)
-            seed_registry(self.registry)
+            self._plugin_report = seed_registry(self.registry)
             self.search_engine = SearchEngine(self.registry.all())
+            self._arrange_mode = False
 
             self._build_layout()
             self._show_home()
@@ -116,18 +177,9 @@ if HAS_CTK:
                          font=ctk.CTkFont(size=11), text_color="#8a93a6").pack(padx=16, anchor="w")
 
             self.nav_buttons: list[ctk.CTkButton] = []
-            self._nav_button("🏠  首页", self._show_home)
-
-            cats = self.registry.categories()
-            if cats:
-                ctk.CTkLabel(self.sidebar, text="分类", font=ctk.CTkFont(size=12, weight="bold"),
-                             text_color="#8a93a6").pack(pady=(20, 4), padx=16, anchor="w")
-                for c in cats:
-                    self._nav_button(f"▸  {c}", lambda cc=c: self._show_home(category=cc))
-
-            ctk.CTkLabel(self.sidebar, text="系统", font=ctk.CTkFont(size=12, weight="bold"),
-                         text_color="#8a93a6").pack(pady=(20, 4), padx=16, anchor="w")
-            self._nav_button("🗂  环境管理", self._show_env_page)
+            self.sidebar_items = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+            self.sidebar_items.pack(fill="both", expand=True)
+            self._rebuild_sidebar()
 
             # 主区域
             self.main = ctk.CTkFrame(self, corner_radius=0, fg_color="#12141a")
@@ -157,8 +209,27 @@ if HAS_CTK:
             # 运行中工具容器
             self.tool_host = ctk.CTkFrame(self.main, fg_color="transparent")
 
+        def _rebuild_sidebar(self):
+            """重建侧边栏导航(分类变化后调用,如安装/卸载插件)。"""
+            for w in self.sidebar_items.winfo_children():
+                w.destroy()
+            self.nav_buttons = []
+            self._nav_button("🏠  首页", self._show_home)
+
+            cats = self.registry.categories()
+            if cats:
+                ctk.CTkLabel(self.sidebar_items, text="分类", font=ctk.CTkFont(size=12, weight="bold"),
+                             text_color="#8a93a6").pack(pady=(20, 4), padx=16, anchor="w")
+                for c in cats:
+                    self._nav_button(f"▸  {c}", lambda cc=c: self._show_home(category=cc))
+
+            ctk.CTkLabel(self.sidebar_items, text="系统", font=ctk.CTkFont(size=12, weight="bold"),
+                         text_color="#8a93a6").pack(pady=(20, 4), padx=16, anchor="w")
+            self._nav_button("🧩  插件管理", self._show_plugins_page)
+            self._nav_button("🗂  环境管理", self._show_env_page)
+
         def _nav_button(self, text: str, command) -> ctk.CTkButton:
-            btn = ctk.CTkButton(self.sidebar, text=text, anchor="w", height=36,
+            btn = ctk.CTkButton(self.sidebar_items, text=text, anchor="w", height=36,
                                 corner_radius=8, fg_color="transparent",
                                 hover_color="#2a2f3a", font=ctk.CTkFont(size=14),
                                 command=command)
@@ -206,9 +277,21 @@ if HAS_CTK:
                              font=ctk.CTkFont(size=16), text_color="#8a93a6").grid(pady=60)
 
         def _render_cards(self, title: str, apps: list[Manifest], reasons: dict | None = None):
-            header = ctk.CTkLabel(self.content, text=title, anchor="w",
-                                  font=ctk.CTkFont(size=18, weight="bold"))
+            header = ctk.CTkFrame(self.content, fg_color="transparent")
             header.grid(row=0, column=0, sticky="ew", columnspan=4, pady=(0, 10))
+            ctk.CTkLabel(header, text=title, anchor="w",
+                         font=ctk.CTkFont(size=18, weight="bold")).pack(side="left")
+            if self._arrange_mode:
+                ctk.CTkButton(header, text="✔ 完成排版", width=110,
+                              fg_color="#27402e", hover_color="#35563e",
+                              command=self._toggle_arrange).pack(side="right")
+                ctk.CTkLabel(header, text="用 ← → 调整工具位置,顺序自动保存",
+                             font=ctk.CTkFont(size=12),
+                             text_color="#8a93a6").pack(side="right", padx=12)
+            else:
+                ctk.CTkButton(header, text="↕ 排版", width=70, fg_color="#2a2f3a",
+                              hover_color="#3a4150",
+                              command=self._toggle_arrange).pack(side="right")
 
             grid = ctk.CTkScrollableFrame(self.content, fg_color="transparent")
             grid.grid(row=1, column=0, sticky="nsew", columnspan=4)
@@ -218,16 +301,40 @@ if HAS_CTK:
 
             for idx, m in enumerate(apps):
                 r, c = divmod(idx, 4)
-                self._tool_card(grid, m, r, c, (reasons or {}).get(m.id, ""))
+                self._tool_card(grid, m, r, c, (reasons or {}).get(m.id, ""),
+                                arrangeable=not reasons)
 
             if not apps:
-                ctk.CTkLabel(grid, text="暂无工具,在 main.py 的 BUILTIN_APPS 中注册新工具。",
+                ctk.CTkLabel(grid, text="暂无工具。点侧边栏「🧩 插件管理」安装第三方工具,\n或在 main.py 的 BUILTIN_APPS 中注册内置工具。",
                              text_color="#8a93a6").grid(row=0, column=0, columnspan=4, pady=40)
 
-        def _tool_card(self, parent, m: Manifest, row: int, col: int, reason: str):
+        def _toggle_arrange(self):
+            self._arrange_mode = not self._arrange_mode
+            self._suppress_search = True
+            q = self.search_var.get()
+            self._suppress_search = False
+            if q.strip():
+                self._on_search()
+            else:
+                self._show_home()
+
+        def _move_app(self, app_id: str, delta: int):
+            if self.registry.move_app(app_id, delta):
+                self.search_engine.update(self.registry.all())
+                self._suppress_search = True
+                q = self.search_var.get()
+                self._suppress_search = False
+                if q.strip():
+                    self._on_search()
+                else:
+                    self._show_home()
+
+        def _tool_card(self, parent, m: Manifest, row: int, col: int, reason: str,
+                       arrangeable: bool = False):
             CARD_BG, CARD_HOVER = "#1e222c", "#252b38"
             card = ctk.CTkFrame(parent, corner_radius=14, fg_color=CARD_BG,
-                                border_width=1, border_color="#2a2f3a")
+                                border_width=1,
+                                border_color="#4f8cff" if self._arrange_mode else "#2a2f3a")
             card.grid(row=row, column=col, sticky="nsew", padx=8, pady=8)
 
             # 手动实现悬停高亮(CTkFrame 不支持 hover_color)
@@ -237,7 +344,11 @@ if HAS_CTK:
                 card.configure(fg_color=CARD_BG)
 
             def _wire(w):
-                w.bind("<Button-1>", lambda _e, mid=m.id: self._launch(mid))
+                if self._arrange_mode and arrangeable:
+                    w.bind("<Button-1>", lambda _e, mid=m.id: self._move_app(mid, -1))
+                    w.bind("<Button-3>", lambda _e, mid=m.id: self._move_app(mid, 1))
+                else:
+                    w.bind("<Button-1>", lambda _e, mid=m.id: self._launch(mid))
                 w.bind("<Enter>", _hover_on, add="+")
                 w.bind("<Leave>", _hover_off, add="+")
                 for c in w.winfo_children():
@@ -246,13 +357,21 @@ if HAS_CTK:
             ctk.CTkLabel(card, text=m.icon, font=ctk.CTkFont(size=30)).pack(anchor="w", padx=16, pady=(14, 2))
             ctk.CTkLabel(card, text=m.name, font=ctk.CTkFont(size=15, weight="bold"),
                          anchor="w").pack(anchor="w", padx=16)
-            ctk.CTkLabel(card, text=m.category, font=ctk.CTkFont(size=11),
+            ctk.CTkLabel(card, text=m.category + ("  · 插件" if m.source == "plugin" else ""),
+                         font=ctk.CTkFont(size=11),
                          text_color=ACCENT, anchor="w").pack(anchor="w", padx=16)
             desc = m.description if len(m.description) <= 46 else m.description[:45] + "…"
             ctk.CTkLabel(card, text=desc, font=ctk.CTkFont(size=12),
                          text_color="#9aa3b5", anchor="w", justify="left",
                          wraplength=170).pack(anchor="w", padx=16, pady=(6, 4))
-            if reason:
+            if self._arrange_mode and arrangeable:
+                mv = ctk.CTkFrame(card, fg_color="transparent")
+                mv.pack(anchor="w", padx=16, pady=(0, 10))
+                ctk.CTkButton(mv, text="← 左移", width=70, height=26,
+                              command=lambda mid=m.id: self._move_app(mid, -1)).pack(side="left", padx=(0, 6))
+                ctk.CTkButton(mv, text="右移 →", width=70, height=26,
+                              command=lambda mid=m.id: self._move_app(mid, 1)).pack(side="left")
+            elif reason:
                 ctk.CTkLabel(card, text=f"✓ {reason}", font=ctk.CTkFont(size=10),
                              text_color="#5cbf7a", anchor="w").pack(anchor="w", padx=16, pady=(0, 10))
             else:
@@ -282,6 +401,108 @@ if HAS_CTK:
             body.pack(fill="both", expand=True)
             app.build(body)
             self._current_app = app
+
+        # ---------- 插件管理页 ----------
+        def _show_plugins_page(self):
+            self._clear_content()
+            ctk.CTkLabel(self.content, text="🧩 插件管理", anchor="w",
+                         font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="ew", columnspan=2)
+
+            intro = ctk.CTkFrame(self.content, corner_radius=12, fg_color="#1e222c")
+            intro.grid(row=1, column=0, sticky="ew", columnspan=2, pady=10)
+            ctk.CTkLabel(intro, anchor="w", justify="left", text_color="#9aa3b5",
+                         font=ctk.CTkFont(size=12),
+                         text=("安装第三方工具:把插件 .py 文件放进插件目录,点「扫描安装」即可。\n"
+                               f"插件目录:{self.registry.plugins_dir}\n"
+                               "开发文档:仓库 docs/PLUGIN_GUIDE.md")).pack(padx=16, pady=12, anchor="w")
+
+            btns = ctk.CTkFrame(self.content, fg_color="transparent")
+            btns.grid(row=2, column=0, sticky="w", columnspan=2, pady=(0, 10))
+            ctk.CTkButton(btns, text="📂 打开插件目录", width=140,
+                          command=self._open_plugins_dir).pack(side="left", padx=(0, 8))
+            ctk.CTkButton(btns, text="🔄 扫描安装", width=110,
+                          command=self._rescan_plugins).pack(side="left", padx=(0, 8))
+            ctk.CTkButton(btns, text="📄 生成插件模板", width=130, fg_color="#2a2f3a",
+                          hover_color="#3a4150",
+                          command=self._make_plugin_template).pack(side="left")
+
+            # 上次扫描报告
+            rep = self._plugin_report
+            msgs = []
+            if rep.get("added"):   msgs.append("新装: " + ", ".join(rep["added"]))
+            if rep.get("updated"): msgs.append("更新: " + ", ".join(rep["updated"]))
+            if rep.get("removed"): msgs.append("已移除: " + ", ".join(rep["removed"]))
+            if rep.get("errors"):  msgs.append("⚠ " + " | ".join(rep["errors"]))
+            if msgs:
+                ctk.CTkLabel(self.content, text="  ".join(msgs), anchor="w",
+                             font=ctk.CTkFont(size=12), text_color="#e8a54b").grid(
+                    row=3, column=0, sticky="ew", columnspan=2, pady=(0, 6))
+
+            # 已安装插件列表
+            plugins = [m for m in self.registry.all() if m.source == "plugin"]
+            table = ctk.CTkFrame(self.content, corner_radius=12, fg_color="#1e222c")
+            table.grid(row=4, column=0, sticky="nsew", columnspan=2)
+            self.content.grid_rowconfigure(4, weight=1)
+            if not plugins:
+                ctk.CTkLabel(table, text="尚未安装任何插件",
+                             text_color="#5c6474").pack(pady=30)
+            else:
+                for i, m in enumerate(plugins):
+                    row = ctk.CTkFrame(table, fg_color="transparent")
+                    row.pack(fill="x", padx=14, pady=4)
+                    ctk.CTkLabel(row, text=f"{m.icon} {m.name}",
+                                 font=ctk.CTkFont(size=13, weight="bold"),
+                                 width=140, anchor="w").pack(side="left")
+                    ctk.CTkLabel(row, text=f"v{m.version} · {m.category}",
+                                 text_color="#8a93a6", width=110, anchor="w").pack(side="left")
+                    ctk.CTkLabel(row, text=m.path, text_color="#5c6474",
+                                 font=ctk.CTkFont(size=10), anchor="w").pack(side="left", fill="x", expand=True)
+                    ctk.CTkButton(row, text="卸载", width=60, height=26,
+                                  fg_color="#5a2730", hover_color="#7a3540",
+                                  command=lambda mm=m: self._uninstall_plugin(mm)).pack(side="right")
+
+        def _open_plugins_dir(self):
+            import subprocess
+            d = str(self.registry.plugins_dir)
+            if sys.platform == "win32":
+                os.startfile(d)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", d])
+            else:
+                subprocess.Popen(["xdg-open", d])
+
+        def _rescan_plugins(self):
+            self._plugin_report = self.registry.sync_plugins()
+            self.search_engine.update(self.registry.all())
+            self._rebuild_sidebar()
+            self._show_plugins_page()
+            added, errs = self._plugin_report["added"], self._plugin_report["errors"]
+            if added:
+                self._toast(f"✅ 已安装 {len(added)} 个插件: {', '.join(added)}")
+            elif errs:
+                self._toast("⚠ 部分插件加载失败,详见页面提示")
+
+        def _make_plugin_template(self):
+            """在插件目录生成一个可直接运行的示例插件,方便照着改。"""
+            target = self.registry.plugins_dir / "hello_plugin.py"
+            if target.exists():
+                self._toast("模板已存在: hello_plugin.py")
+                self._open_plugins_dir()
+                return
+            target.write_text(PLUGIN_TEMPLATE, "utf-8")
+            self._toast("已生成模板 hello_plugin.py,点「扫描安装」试试")
+
+        def _uninstall_plugin(self, m: Manifest):
+            from tkinter import messagebox
+            if not messagebox.askyesno("卸载插件",
+                                       f"卸载「{m.name}」?\n将从注册表移除。插件文件和数据目录保留,\n"
+                                       f"如要彻底删除,请手动删文件和在环境管理页删数据。"):
+                return
+            self.registry.unregister(m.id)
+            self.search_engine.update(self.registry.all())
+            self._rebuild_sidebar()
+            self._show_plugins_page()
+            self._toast(f"已卸载 {m.name}")
 
         def _show_env_page(self):
             self._clear_content()
@@ -360,8 +581,9 @@ if HAS_CTK:
                 return
             # 重建注册表与搜索引擎(指向新 root)
             self.registry = Registry(self.env)
-            seed_registry(self.registry)
+            self._plugin_report = seed_registry(self.registry)
             self.search_engine.update(self.registry.all())
+            self._rebuild_sidebar()
             self._toast(f"✅ 数据目录已更改为 {Path(new_root)}")
             self._show_env_page()
 

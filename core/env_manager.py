@@ -71,6 +71,8 @@ class AppEnvironment:
         self._m = manager
         self.app_id = app_id
         self.base: Path = manager.root / "apps" / app_id
+        # 注册即落盘目录,卸载后数据仍保留在这里
+        self.base.mkdir(parents=True, exist_ok=True)
 
     # ---- 目录 ----
     @property
