@@ -343,7 +343,13 @@ if HAS_CTK:
             def _hover_off(_e):
                 card.configure(fg_color=CARD_BG)
 
+            # 排版模式的移动按钮子树:不能被 _wire 重复绑定点击
+            # (否则点「右移」会同时触发 command(+1) 和 card 的 Button-1 绑定(-1),净移动为0)
+            self._arrange_btn_zone = None
+
             def _wire(w):
+                if w is self._arrange_btn_zone:
+                    return  # 跳过移动按钮区域,由按钮自己的 command 处理
                 if self._arrange_mode and arrangeable:
                     w.bind("<Button-1>", lambda _e, mid=m.id: self._move_app(mid, -1))
                     w.bind("<Button-3>", lambda _e, mid=m.id: self._move_app(mid, 1))
@@ -367,6 +373,7 @@ if HAS_CTK:
             if self._arrange_mode and arrangeable:
                 mv = ctk.CTkFrame(card, fg_color="transparent")
                 mv.pack(anchor="w", padx=16, pady=(0, 10))
+                self._arrange_btn_zone = mv
                 ctk.CTkButton(mv, text="← 左移", width=70, height=26,
                               command=lambda mid=m.id: self._move_app(mid, -1)).pack(side="left", padx=(0, 6))
                 ctk.CTkButton(mv, text="右移 →", width=70, height=26,
