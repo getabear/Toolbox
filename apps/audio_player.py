@@ -5,24 +5,21 @@
   · WAV:自动解析头部(采样率/位深/通道)
   · PCM 裸数据:手动设置采样率、位深(8/16/24/32)、通道数
   · 可拖动进度条 seek
-  · 波形显示(PIL 不需要,纯 Canvas)
+  · 波形显示(QPainter 绘制,点击波形可跳转)
   · 播放引擎基于 sounddevice;未安装或无声卡时自动降级(仍可解析/看波形)
 """
 from __future__ import annotations
 
 import threading
-import time
 import wave
 from pathlib import Path
 
-import tkinter as tk
-from tkinter import filedialog
-
-try:
-    import customtkinter as ctk
-    HAS_CTK = True
-except ImportError:
-    HAS_CTK = False
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QPainter
+from PySide6.QtWidgets import (
+    QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
+    QSlider, QVBoxLayout, QWidget,
+)
 
 try:
     import numpy as np
@@ -141,12 +138,12 @@ class PlaybackEngine:
     def play(self) -> bool:
         if not HAS_SD or self.data is None:
             return False
+        if self.finished:      # 播完后再点播放:从头开始(复用旧流时也要回卷)
+            self.seek_fraction(0)
         if self._stream is not None:
             self._stream.start()
             return True
         try:
-            if self._pos >= len(self.data):
-                self._pos = 0
             self._stream = sd.OutputStream(
                 samplerate=self.samplerate, channels=self.channels,
                 dtype="float32", callback=self._callback)
@@ -180,127 +177,226 @@ class PlaybackEngine:
 
     @property
     def finished(self) -> bool:
-        return self.data is not None and self._pos >= len(self.data) and not self.is_playing
+        # 注意:流播到末尾不会自动停(回调持续输出静音),不能用 is_playing 判断
+        return self.data is not None and len(self.data) > 0 and self._pos >= len(self.data)
+
+
+# ---------------- 波形控件 ----------------
+
+class WaveformWidget(QWidget):
+    """波形显示:峰值竖线绘制,已播放部分高亮,点击跳转。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(120)
+        self.setMinimumWidth(100)
+        self.setCursor(Qt.PointingHandCursor)
+        self._peaks = None        # numpy:每像素峰值幅度 0~1
+        self._fraction = 0.0
+        self.on_seek = None       # 回调: on_seek(fraction)
+        self.on_resize = None     # 回调: 宽度变化后重算峰值
+
+    def set_peaks(self, peaks):
+        self._peaks = peaks
+        self.update()
+
+    def set_fraction(self, frac: float):
+        self._fraction = frac
+        self.update()
+
+    def paintEvent(self, ev):
+        p = QPainter(self)
+        p.fillRect(self.rect(), _BG)
+        w, h = self.width(), self.height()
+        mid = h // 2
+        p.fillRect(0, mid, w, 1, _LINE_MID)
+        if self._peaks is None or len(self._peaks) == 0 or w < 10:
+            p.end()
+            return
+        peaks = self._peaks
+        n = min(len(peaks), w)
+        played_x = int(self._fraction * w)
+        amp = h / 2 - 4
+        for x in range(n):
+            yv = int(mid - float(peaks[x]) * amp)
+            p.fillRect(x, yv, 1, mid - yv, _PLAYED if x <= played_x else _UNPLAYED)
+        p.end()
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.LeftButton and self.width() > 0 and self.on_seek:
+            self.on_seek(max(0.0, min(1.0, ev.position().x() / self.width())))
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        if self.on_resize:
+            self.on_resize()
+
+
+_BG = QColor("#171a21")
+_LINE_MID = QColor("#2a2f3a")
+_PLAYED = QColor("#4f8cff")
+_UNPLAYED = QColor("#3a4150")
+
+
+def _clear_bg(widget: QWidget) -> None:
+    """容器自身背景透明,但用 objectName 选择器限定作用范围。
+
+    直接用 setStyleSheet("background: transparent;")(无选择器)会级联到
+    所有子控件并覆盖应用级 QSS——按钮/下拉框会变透明,hover/pressed
+    反馈全部失效。Qt 作用域规则:父控件样式表优先于应用样式表。
+    """
+    widget.setObjectName("apClearBg")
+    widget.setStyleSheet("QWidget#apClearBg { background: transparent; }")
 
 
 # ---------------- UI ----------------
 
 class AudioPlayerApp(ToolApp):
-    def build(self, root: tk.Misc) -> None:
+    def build(self, root: QWidget) -> None:
         self.engine = PlaybackEngine()
         self._file_path: str | None = None
-        self._dragging = False
-        self._tick_id = None
         cfg = self.env.get_config({"samplerate": "44100", "bit_depth": "16", "channels": "1"})
 
-        wrap = ctk.CTkFrame(root, fg_color="transparent") if HAS_CTK else tk.Frame(root)
-        wrap.pack(fill="both", expand=True, padx=12, pady=8)
+        wrap = QWidget(root)
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(12, 8, 12, 8)
+        outer.addWidget(wrap)
+
+        lay = QVBoxLayout(wrap)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
 
         # -- 文件行 --
-        row1 = ctk.CTkFrame(wrap, fg_color="transparent") if HAS_CTK else tk.Frame(wrap)
-        row1.pack(fill="x", pady=(0, 8))
-        self.file_label = self._label(row1, "未加载文件", 13, "#9aa3b5")
-        self.file_label.pack(side="left", fill="x", expand=True)
-        self._button(row1, "📂 打开 WAV / PCM", self._open_file).pack(side="right", padx=(8, 0))
+        row1 = QWidget()
+        _clear_bg(row1)
+        r1 = QHBoxLayout(row1)
+        r1.setContentsMargins(0, 0, 0, 0)
+        self.file_label = QLabel("未加载文件")
+        self.file_label.setStyleSheet("color: #9aa3b5; font-size: 13px;")
+        r1.addWidget(self.file_label, 1)
+        open_btn = QPushButton("📂 打开 WAV / PCM")
+        open_btn.clicked.connect(self._open_file)
+        r1.addWidget(open_btn)
+        lay.addWidget(row1)
 
-        # -- 参数设置 --
-        row2 = ctk.CTkFrame(wrap, corner_radius=10, fg_color="#1e222c") if HAS_CTK else tk.LabelFrame(wrap, text="参数")
-        row2.pack(fill="x", pady=(0, 8))
-        self.sr_var = tk.StringVar(value=cfg.get("samplerate", "44100"))
-        self.bd_var = tk.StringVar(value=cfg.get("bit_depth", "16"))
-        self.ch_var = tk.StringVar(value=cfg.get("channels", "1"))
-        self.sr_combo = self._combo(row2, "采样率", SAMPLE_RATES, self.sr_var)
-        self.bd_combo = self._combo(row2, "位深", BIT_DEPTHS, self.bd_var)
-        self.ch_combo = self._combo(row2, "通道", CHANNELS, self.ch_var)
-        self._button(row2, "按此参数重新解析", self._reparse).pack(side="left", padx=12, pady=10)
-        self.info_label = self._label(row2, "", 12, "#8a93a6")
-        self.info_label.pack(side="left", padx=8)
+        # -- 参数设置(网格对齐:第一行标签,第二行下拉,按钮/信息与下拉底对齐) --
+        row2 = QFrame()
+        row2.setObjectName("panel")
+        r2 = QGridLayout(row2)
+        r2.setContentsMargins(12, 10, 12, 10)
+        r2.setHorizontalSpacing(12)
+        r2.setVerticalSpacing(4)
+        self.sr_combo = self._combo(r2, 0, "采样率", SAMPLE_RATES, cfg.get("samplerate", "44100"))
+        self.bd_combo = self._combo(r2, 1, "位深", BIT_DEPTHS, cfg.get("bit_depth", "16"))
+        self.ch_combo = self._combo(r2, 2, "通道", CHANNELS, cfg.get("channels", "1"))
+        reparse_btn = QPushButton("按此参数重新解析")
+        reparse_btn.clicked.connect(self._reparse)
+        r2.addWidget(reparse_btn, 0, 3, Qt.AlignBottom)
+        self.info_label = QLabel("")
+        self.info_label.setStyleSheet("color: #8a93a6; font-size: 12px;")
+        r2.addWidget(self.info_label, 0, 4, Qt.AlignBottom | Qt.AlignLeft)
+        r2.setColumnStretch(4, 1)
+        lay.addWidget(row2)
 
         # -- 波形 --
-        self.canvas = tk.Canvas(wrap, height=120, bg="#171a21", highlightthickness=0)
-        self.canvas.pack(fill="x", pady=(0, 8))
-        self.canvas.bind("<Configure>", lambda _e: self._draw_wave())
-        self.canvas.bind("<Button-1>", self._canvas_seek)
+        self.wave = WaveformWidget()
+        self.wave.on_seek = self._wave_seek
+        self.wave.on_resize = self._update_wave_peaks
+        lay.addWidget(self.wave)
 
         # -- 进度条 --
-        row3 = ctk.CTkFrame(wrap, fg_color="transparent") if HAS_CTK else tk.Frame(wrap)
-        row3.pack(fill="x")
-        self.time_label = self._label(row3, "00:00", 12)
-        self.time_label.pack(side="left")
-        self.slider = ctk.CTkSlider(row3, from_=0, to=1000, number_of_steps=1000,
-                                    command=self._on_slider) if HAS_CTK else tk.Scale(row3, from_=0, to=1000, orient="horizontal", command=self._on_slider)
-        self.slider.pack(side="left", fill="x", expand=True, padx=10)
-        if HAS_CTK:
-            self.slider.bind("<Button-1>", lambda _e: setattr(self, "_dragging", True))
-            self.slider.bind("<ButtonRelease-1>", self._on_slider_release)
-        self.dur_label = self._label(row3, "00:00", 12)
-        self.dur_label.pack(side="right")
+        row3 = QWidget()
+        _clear_bg(row3)
+        r3 = QHBoxLayout(row3)
+        r3.setContentsMargins(0, 0, 0, 0)
+        self.time_label = QLabel("00:00")
+        r3.addWidget(self.time_label)
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(0, 1000)
+        self.slider.sliderMoved.connect(self._on_slider_move)
+        self.slider.sliderReleased.connect(self._on_slider_release)
+        r3.addWidget(self.slider, 1)
+        self.dur_label = QLabel("00:00")
+        r3.addWidget(self.dur_label)
+        lay.addWidget(row3)
 
         # -- 控制按钮 --
-        row4 = ctk.CTkFrame(wrap, fg_color="transparent") if HAS_CTK else tk.Frame(wrap)
-        row4.pack(fill="x", pady=(10, 0))
-        self.play_btn = self._button(row4, "▶ 播放", self._toggle_play, width=100)
-        self.play_btn.pack(side="left", padx=(0, 8))
-        self._button(row4, "⏹ 停止", self._stop, width=80).pack(side="left")
-        self.dev_label = self._label(row4, "" if HAS_SD else "⚠ 未安装 sounddevice,无法播放(仍可解析波形)", 11, "#c8a04f")
-        self.dev_label.pack(side="left", padx=16)
+        row4 = QWidget()
+        _clear_bg(row4)
+        r4 = QHBoxLayout(row4)
+        r4.setContentsMargins(0, 0, 0, 0)
+        r4.setSpacing(8)
+        self.play_btn = QPushButton("▶ 播放")
+        self.play_btn.setFixedWidth(100)
+        self.play_btn.clicked.connect(self._toggle_play)
+        r4.addWidget(self.play_btn)
+        stop_btn = QPushButton("⏹ 停止")
+        stop_btn.setFixedWidth(80)
+        stop_btn.clicked.connect(self._stop)
+        r4.addWidget(stop_btn)
+        self.dev_label = QLabel(
+            "" if HAS_SD else "⚠ 未安装 sounddevice,无法播放(仍可解析波形)")
+        self.dev_label.setStyleSheet("color: #c8a04f; font-size: 11px;")
+        r4.addWidget(self.dev_label)
+        r4.addStretch(1)
+        lay.addWidget(row4)
+
+        self._dragging = False
+        self._tick = QTimer(wrap)
+        self._tick.setInterval(200)
+        self._tick.timeout.connect(self._tick_update)
 
         if not HAS_NP:
             self._set_info("⚠ 未安装 numpy,请先 pip install numpy")
 
-        self._draw_wave()
-
-    # ---- 控件工厂(兼容降级) ----
-    def _label(self, parent, text, size=12, color=None):
-        if HAS_CTK:
-            kw = {"font": ctk.CTkFont(size=size)}
-            if color:
-                kw["text_color"] = color
-            return ctk.CTkLabel(parent, text=text, **kw)
-        return tk.Label(parent, text=text)
-
-    def _button(self, parent, text, cmd, width=None):
-        if HAS_CTK:
-            kw = {"command": cmd, "corner_radius": 8}
-            if width:
-                kw["width"] = width
-            return ctk.CTkButton(parent, text=text, **kw)
-        return tk.Button(parent, text=text, command=cmd)
-
-    def _combo(self, parent, label, values, var):
-        if HAS_CTK:
-            f = ctk.CTkFrame(parent, fg_color="transparent")
-            f.pack(side="left", padx=(12, 0), pady=10)
-            ctk.CTkLabel(f, text=label, font=ctk.CTkFont(size=12),
-                         text_color="#8a93a6").pack(anchor="w")
-            cb = ctk.CTkComboBox(f, values=values, variable=var, width=100)
-            cb.pack()
-            return cb
-        f = tk.Frame(parent)
-        f.pack(side="left", padx=8)
-        tk.Label(f, text=label).pack()
-        cb = tk.OptionMenu(f, var, *values)
-        cb.pack()
+    def _combo(self, grid, col, label, values, current):
+        box = QWidget()
+        _clear_bg(box)
+        vl = QVBoxLayout(box)
+        vl.setContentsMargins(0, 0, 0, 0)
+        vl.setSpacing(2)
+        lab = QLabel(label)
+        lab.setStyleSheet("color: #8a93a6; font-size: 12px;")
+        vl.addWidget(lab)
+        cb = QComboBox()
+        cb.addItems(values)
+        cb.setMinimumWidth(100)
+        cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        if current in values:
+            cb.setCurrentText(current)
+        vl.addWidget(cb)
+        grid.addWidget(box, 0, col, Qt.AlignBottom)
         return cb
 
     # ---- 文件 ----
+    def _halt_playback(self):
+        """数据将变更(加载/重解析)时:停止流和计时器,按钮回到"播放",进度归零。"""
+        self.engine.stop()
+        self._tick.stop()
+        self._dragging = False
+        self._set_play_text(False)
+        self.slider.setValue(0)
+        self.wave.set_fraction(0.0)
+
     def _open_file(self):
-        path = filedialog.askopenfilename(
-            title="选择音频文件",
-            filetypes=[("音频文件", "*.wav *.pcm *.raw"), ("WAV", "*.wav"),
-                       ("原始 PCM", "*.pcm *.raw"), ("所有文件", "*.*")])
+        path, _ = QFileDialog.getOpenFileName(
+            self.wave.window(), "选择音频文件", "",
+            "音频文件 (*.wav *.pcm *.raw);;WAV (*.wav);;原始 PCM (*.pcm *.raw);;所有文件 (*)")
         if path:
             self._load_file(path)
 
     def _load_file(self, path: str):
         self._file_path = path
+        self._halt_playback()
         p = Path(path)
-        self.file_label.configure(text=f"🎵 {p.name}") if HAS_CTK else self.file_label.config(text=p.name)
+        self.file_label.setText(f"🎵 {p.name}")
         self._save_cfg()
         try:
             if p.suffix.lower() == ".wav":
                 data, sr, ch, bd = read_wav(p)
-                self.sr_var.set(str(sr)); self.ch_var.set(str(ch)); self.bd_var.set(str(bd))
+                self.sr_combo.setCurrentText(str(sr))
+                self.ch_combo.setCurrentText(str(ch))
+                self.bd_combo.setCurrentText(str(bd))
                 self.engine.load(data, sr, ch)
                 self._set_info(f"WAV · {sr} Hz · {bd} bit · {ch} ch · {fmt_time(len(data)/sr)}")
             else:
@@ -311,7 +407,7 @@ class AudioPlayerApp(ToolApp):
             self.log.error("load failed: %s", e)
             return
         self.log.info("loaded %s", path)
-        self._draw_wave()
+        self._update_wave_peaks()
         self._update_time_ui()
 
     def _reparse(self):
@@ -322,9 +418,12 @@ class AudioPlayerApp(ToolApp):
         if not HAS_NP:
             self._set_info("需要 numpy")
             return
+        self._halt_playback()
         p = Path(self._file_path)
         try:
-            sr = int(self.sr_var.get()); bd = int(self.bd_var.get()); ch = int(self.ch_var.get())
+            sr = int(self.sr_combo.currentText())
+            bd = int(self.bd_combo.currentText())
+            ch = int(self.ch_combo.currentText())
         except ValueError:
             self._set_info("参数必须是数字")
             return
@@ -337,75 +436,62 @@ class AudioPlayerApp(ToolApp):
             self.engine.load(data, sr, ch)
             self._set_info(f"PCM · {sr} Hz · {bd} bit · {ch} ch · {fmt_time(self.engine.duration)}")
             self._save_cfg()
-            self._draw_wave()
+            self._update_wave_peaks()
             self._update_time_ui()
         except Exception as e:
             self._set_info(f"❌ 解析失败: {e}")
             self.log.error("reparse failed: %s", e)
 
     def _save_cfg(self):
-        self.env.update_config(samplerate=self.sr_var.get(),
-                               bit_depth=self.bd_var.get(),
-                               channels=self.ch_var.get())
+        self.env.update_config(samplerate=self.sr_combo.currentText(),
+                               bit_depth=self.bd_combo.currentText(),
+                               channels=self.ch_combo.currentText())
 
     def _set_info(self, text):
-        if HAS_CTK:
-            self.info_label.configure(text=text)
-        else:
-            self.info_label.config(text=text)
+        self.info_label.setText(text)
 
     # ---- 波形 ----
-    def _draw_wave(self):
-        c = self.canvas
-        c.delete("all")
-        w, h = c.winfo_width(), c.winfo_height()
-        if w < 10 or not HAS_NP or self.engine.data is None:
+    def _update_wave_peaks(self):
+        """按当前控件宽度重算峰值;宽度变化时也会重算(paintEvent 只做绘制)。"""
+        if not HAS_NP or self.engine.data is None:
+            self.wave.set_peaks(None)
             return
         data = self.engine.data
         mono = data.mean(axis=1) if data.ndim == 2 and data.shape[1] > 1 else data[:, 0]
         n = len(mono)
+        w = max(self.wave.width(), 100)
         step = max(1, n // w)
-        idx = np.arange(0, n - step + 1, step)[:w]
+        idx = np.arange(0, n - step + 1, step)
         if len(idx) == 0:
+            self.wave.set_peaks(None)
             return
-        peaks_max = np.maximum.reduceat(np.abs(mono), idx)
-        ys = (h / 2 - peaks_max * (h / 2 - 4)).astype(int)
-        mid = h // 2
-        c.create_line(0, mid, w, mid, fill="#2a2f3a")
-        # 已播放部分高亮
-        played_x = int(self.engine.fraction * w)
-        for x in range(len(idx)):
-            col = "#4f8cff" if x <= played_x else "#3a4150"
-            c.create_line(x, mid, x, ys[x], fill=col)
+        peaks = np.maximum.reduceat(np.abs(mono), idx)
+        self.wave.set_peaks(peaks)
+        self.wave.set_fraction(self.engine.fraction)
 
-    def _canvas_seek(self, event):
-        w = self.canvas.winfo_width()
-        if w > 0 and self.engine.data is not None:
-            self.engine.seek_fraction(event.x / w)
-            self._draw_wave()
-            self._update_time_ui()
+    def _wave_seek(self, frac: float):
+        self.engine.seek_fraction(frac)
+        self.wave.set_fraction(self.engine.fraction)
+        self._update_time_ui()
 
     # ---- 进度条 ----
-    def _on_slider(self, value):
-        if self._dragging and self.engine.data is not None:
-            v = float(value) / 1000.0
-            self.engine.seek_fraction(v)
-            self._draw_wave()
+    def _on_slider_move(self, value: int):
+        self._dragging = True
+        if self.engine.data is not None:
+            self.engine.seek_fraction(value / 1000.0)
+            self.wave.set_fraction(self.engine.fraction)
             self._update_time_ui()
 
-    def _on_slider_release(self, _e):
+    def _on_slider_release(self):
         self._dragging = False
 
     def _update_time_ui(self):
         pos, dur = self.engine.position, self.engine.duration
-        if HAS_CTK:
-            self.time_label.configure(text=fmt_time(pos))
-            self.dur_label.configure(text=fmt_time(dur))
-            if not self._dragging:
-                self.slider.set(self.engine.fraction * 1000)
-        else:
-            self.time_label.config(text=fmt_time(pos))
-            self.dur_label.config(text=fmt_time(dur))
+        self.time_label.setText(fmt_time(pos))
+        self.dur_label.setText(fmt_time(dur))
+        if not self._dragging:
+            self.slider.setValue(int(self.engine.fraction * 1000))
+        self.wave.set_fraction(self.engine.fraction)
 
     # ---- 播放 ----
     def _toggle_play(self):
@@ -415,44 +501,32 @@ class AudioPlayerApp(ToolApp):
         if self.engine.is_playing:
             self.engine.pause()
             self._set_play_text(False)
+            self._tick.stop()
         else:
             if self.engine.finished:
                 self.engine.seek_fraction(0)
             if self.engine.play():
                 self._set_play_text(True)
-                self._start_tick()
+                self._tick.start()
             else:
                 self._set_info("⚠ 无法打开音频输出设备(无声卡或未装 sounddevice)")
 
     def _set_play_text(self, playing: bool):
-        text = "⏸ 暂停" if playing else "▶ 播放"
-        if HAS_CTK:
-            self.play_btn.configure(text=text)
-        else:
-            self.play_btn.config(text=text)
+        self.play_btn.setText("⏸ 暂停" if playing else "▶ 播放")
 
-    def _start_tick(self):
-        if self._tick_id:
-            return
-        def tick():
-            self._tick_id = None
+    def _tick_update(self):
+        self._update_time_ui()
+        if self.engine.finished:
+            self._set_play_text(False)
+            self.engine.stop()
             self._update_time_ui()
-            self._draw_wave()
-            if self.engine.finished:
-                self._set_play_text(False)
-                self.engine.stop()
-                self._update_time_ui()
-                self._draw_wave()
-                return
-            if self.engine.is_playing:
-                self._tick_id = self.canvas.after(200, tick)
-        self._tick_id = self.canvas.after(200, tick)
+            self._tick.stop()
 
     def _stop(self):
         self.engine.stop()
+        self._tick.stop()
         self._set_play_text(False)
         self._update_time_ui()
-        self._draw_wave()
 
     def on_close(self):
         self.engine.stop()
