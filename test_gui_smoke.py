@@ -177,7 +177,51 @@ try:
     app.processEvents()
     check("播完后点播放按钮从头开始", ap.engine._pos == 0 and ap.engine.finished is False)
     ap.engine.play = _orig_play
+
+    # 回归1:播放中点"按此参数重新解析"→ 暂停、进度归零、按钮回到"播放"
+    class _FakeStream:
+        def __init__(self, *a, **k): self.active = False
+        def start(self): self.active = True
+        def stop(self): self.active = False
+        def close(self): self.active = False
+    import apps.audio_player as apmod
+    _sd_backup = (apmod.HAS_SD, getattr(apmod, "sd", None))
+    apmod.HAS_SD = True
+    apmod.sd = type(sys)("sdstub"); apmod.sd.OutputStream = _FakeStream
+    ap._load_file(wav_path)
+    ap.play_btn.click()
+    app.processEvents()
+    check("播放态建立(打桩设备)", ap.engine.is_playing and ap.play_btn.text() == "⏸ 暂停")
+    ap.engine._pos = 80000
+    time.sleep(0.25); app.processEvents()
+    page_buttons(text="按此参数重新解析")[0].click()
+    app.processEvents()
+    check("播放中重解析:暂停+进度归零+按钮复位",
+          not ap.engine.is_playing and not ap._tick.isActive()
+          and ap.play_btn.text() == "▶ 播放"
+          and ap.slider.value() == 0 and ap.engine._pos == 0)
+
+    # 回归2:行容器的透明背景不得级联吃掉子按钮/下拉框样式(Qt 父样式表优先于窗口级 QSS)
+    from PySide6.QtGui import QImage
+    from PySide6.QtCore import Qt, QPoint
+    from PySide6.QtTest import QTest
+    def _px(w, x):
+        img = w.grab().toImage().convertToFormat(QImage.Format_ARGB32)
+        c = img.pixelColor(x, w.height() // 2)
+        return f"#{c.red():02x}{c.green():02x}{c.blue():02x}"
+    pb = ap.play_btn
+    QTest.mouseMove(pb, QPoint(6, pb.height() // 2))
+    QTest.qWait(60); hv = _px(pb, 6)
+    QTest.mouseRelease(pb, Qt.LeftButton, Qt.NoModifier, QPoint(6, pb.height() // 2))
+    QTest.qWait(60)
+    check("播放按钮 hover 有反馈", hv == "#6ba0ff", hv)
+    QTest.mouseMove(ap.time_label, QPoint(2, 2))   # 指针移开,退出 hover 态
+    QTest.qWait(60)
+    ap._stop(); app.processEvents()                # 上面 release 触发了一次点击播放,先复位
+    check("播放按钮静止为主题色", _px(pb, 6) == "#4f8cff", _px(pb, 6))
+    check("下拉框有卡片底色", _px(ap.sr_combo, ap.sr_combo.width() - 26) == "#1e222c")
     ap._stop()
+    apmod.HAS_SD, apmod.sd = _sd_backup if _sd_backup[1] is not None else (_sd_backup[0], apmod.sd)
     win._show_home()
     app.processEvents()
 except ImportError as e:
