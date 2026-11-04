@@ -21,7 +21,7 @@
 ```python
 # -*- coding: utf-8 -*-
 """我的工具:一句话说明。"""
-import customtkinter as ctk
+from PySide6.QtWidgets import QLabel
 
 # ① MANIFEST:元数据(必填)
 MANIFEST = {
@@ -45,8 +45,10 @@ except ImportError:   # 开发调试兜底
 
 class MyTool(ToolApp):
     def build(self, root):
-        """构建界面。root 是给你的容器 frame,用 pack/grid 随意布局。"""
-        ctk.CTkLabel(root, text="Hello Toolbox!").pack(pady=20)
+        """构建界面。root 是给你的容器 QWidget,设置布局后自由添加控件。"""
+        from PySide6.QtWidgets import QVBoxLayout
+        lay = QVBoxLayout(root)
+        lay.addWidget(QLabel("Hello Toolbox!"))
 
     def on_close(self):
         """可选:主窗口关闭时调用,用来保存状态。"""
@@ -127,8 +129,8 @@ class MyTool(ToolApp):
 **Q: id 和内置工具冲突?**
 插件会被忽略并提示冲突。换个 id。
 
-**Q: 界面能用原生 tkinter 吗?**
-能。`root` 就是普通 tk 容器,tk/customtkinter 控件都可以用。建议优先 customtkinter(已内置),风格统一。
+**Q: 界面用什么 GUI 库?**
+PySide6(Qt)。`root` 是普通 QWidget,给它设置布局(QVBoxLayout/QGridLayout 等)后自由添加控件。主程序的全局样式表(深色主题、按钮/滚动条样式)会自动作用于你的控件,风格天然统一。
 
 **Q: 想要无界面的后台工具?**
 当前版本面向 GUI 工具。`build(root)` 里可以放一个极简状态页,逻辑跑在后台线程。
@@ -142,4 +144,4 @@ class MyTool(ToolApp):
 仓库 `apps/` 目录下三个内置工具就是三种复杂度的样板:
 - `demo_notepad.py` — 最简(文本框+保存)
 - `daily_tasks.py` — 中等(JSON 持久化+列表渲染+toast)
-- `audio_player.py` — 复杂(线程音频回调+Canvas 波形+可选依赖降级)
+- `audio_player.py` — 复杂(线程音频回调+QPainter 波形+可选依赖降级)

@@ -2,13 +2,13 @@
 
 > Windows 平台的可扩展小工具集合 —— 受管环境 · 自然语言搜索 · 插件式扩展
 >
-> 深色现代界面(Python + CustomTkinter),MIT 开源。
+> 深色现代界面(Python + PySide6/Qt),MIT 开源。
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows-green) ![License](https://img.shields.io/badge/license-MIT-orange)
 
 ## ✨ 特性
 
-- **🖥 现代化界面** — CustomTkinter 深色主题,侧边栏导航 + 卡片式工具列表
+- **🖥 现代化界面** — PySide6/Qt 深色主题(硬件加速渲染),侧边栏导航 + 卡片式工具列表
 - **🔍 智能搜索** — 支持关键字、拼写容错(`notpad` 也能搜到便签)、**自然语言描述**(试试搜「每天要打卡的任务」)
 - **🗂 环境管理** — 每个工具的数据/配置/缓存/日志都被沙箱化管理,统一存放在 `%APPDATA%\Toolbox\`(可在环境管理页**更改数据目录**,自动搬迁、支持跨盘),内置磁盘占用查看、一键清缓存、彻底删数据
 - **🔌 插件系统** — 外部用户**不用改源码**:把一个 `.py` 插件文件丢进插件目录,点「扫描安装」即接入(卡片/分类/搜索/数据沙箱全自动)。详见 [插件开发指南](docs/PLUGIN_GUIDE.md)
@@ -28,6 +28,8 @@
 
 到 [Releases](https://github.com/getabear/Toolbox/releases) 页面下载 `Toolbox.exe`,双击运行,无需安装 Python。
 
+> Releases 由 GitHub Actions 自动构建:推送 `v*` 标签即在 windows-latest 上打包 exe 并发布(见 `.github/workflows/release.yml`)。
+
 ### 方式二:源码运行
 
 ```bat
@@ -42,10 +44,11 @@ python main.py
 ### 自己打包成 exe
 
 ```bat
+python -m venv .venv
 build.bat
 ```
 
-产物在 `dist\Toolbox.exe`(脚本会自动安装 pyinstaller)。
+`build.bat` 固定使用项目根下的 `.venv\Scripts\python.exe`(不存在会失败),自动安装 pyinstaller 及全部依赖,并把 `toolbox.ico` 嵌入 exe(窗口/任务栏图标)。产物在 `dist\Toolbox.exe`。
 
 ## 📖 使用说明
 
@@ -53,7 +56,7 @@ build.bat
 - **分类**:左侧边栏按分类浏览
 - **排版**:首页右上「↕ 排版」进入排版模式,卡片出现「← 左移 / 右移 →」按钮(排版模式下点击卡片=左移、右键=右移),顺序自动保存,重启不丢
 - **插件管理**:侧边栏「🧩 插件管理」→「📄 生成插件模板」+「📂 打开插件目录」+「🔄 扫描安装」,三步装上你自己的工具;插件出错会单独提示,不影响主程序
-- **环境管理**:侧边栏「🗂 环境管理」可查看每个工具的磁盘占用,清理缓存、删除数据(带二次确认),还可**更改数据根目录**(自动搬迁,支持跨盘,失败自动回滚)
+- **环境管理**:侧边栏「🗂 环境管理」可查看每个工具的磁盘占用,清理缓存、删除数据(带二次确认),还可**更改数据根目录**(自动搬迁,支持跨盘,失败自动回滚,一键恢复默认位置)
 - **数据存储位置**:所有工具数据统一在 `%APPDATA%\Toolbox\apps\<工具id>\`,卸载即删,不留垃圾
 
 ## 🔧 如何添加你自己的工具
@@ -64,7 +67,7 @@ build.bat
 
 ```python
 # my_tool.py —— 放到 %APPDATA%\Toolbox\plugins\ 下
-import customtkinter as ctk
+from PySide6.QtWidgets import QLabel, QVBoxLayout
 
 MANIFEST = {
     "id": "my_tool",
@@ -86,9 +89,10 @@ except ImportError:
 
 class MyTool(ToolApp):
     def build(self, root):
-        # root 是你的容器,随便搭界面
+        # root 是你的容器 QWidget,设置布局后随便搭界面
         # 数据用 self.data_path("x.db"),配置用 self.env.get_config()/save_config()
-        ctk.CTkLabel(root, text="Hello Toolbox!").pack(pady=20)
+        lay = QVBoxLayout(root)
+        lay.addWidget(QLabel("Hello Toolbox!"))
 ```
 
 然后在 Toolbox 的「插件管理」页点「🔄 扫描安装」。
@@ -116,14 +120,28 @@ Toolbox/
 │   └── demo_notepad.py
 ├── docs/
 │   └── PLUGIN_GUIDE.md  # 插件开发指南(外部用户从这里开始)
-├── test_plugins.py      # 插件系统+排序回归测试
+├── .github/workflows/release.yml  # 推 v* 标签 → Actions 自动打包 exe 发 Release
+├── test_plugins.py      # 插件系统+排序回归测试(纯逻辑,无 GUI)
+├── test_gui_smoke.py    # GUI 冒烟测试:真实点击卡片/排版/播放器控件,offscreen 可跑
+├── toolbox.ico          # 应用图标(exe 嵌入 + 窗口/任务栏)
 ├── requirements.txt
-└── build.bat            # PyInstaller 一键打包
+└── build.bat            # PyInstaller 一键打包(用项目根 .venv)
 ```
 
 第三方插件放在数据目录的 `plugins/` 下(单文件或目录形态),启动/扫描时自动加载,与源码解耦。
 
 **搜索评分**:精确/前缀命中 > 关键字 > 分类 > 描述包含 > 模糊匹配(容错拼写)> 多词语义覆盖度(中文按 bigram 分词)。纯本地计算,无联网、无模型依赖。
+
+## 🧪 测试
+
+```bat
+python test_plugins.py
+set QT_QPA_PLATFORM=offscreen
+python test_gui_smoke.py
+```
+
+- `test_plugins.py` — 插件注册/加载/卸载 + 卡片排序持久化的纯逻辑回归,无需界面
+- `test_gui_smoke.py` — GUI 冒烟:真实点击卡片、搜索、排版、便签存盘、任务增删完成、播放器装载/seek/重解析/按钮 hover 等 40 项检查,无声卡环境自动打桩,`offscreen` 模式可在 CI 跑
 
 ## 🤝 贡献
 
