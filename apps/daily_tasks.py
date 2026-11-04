@@ -14,13 +14,12 @@ import json
 import random
 import time
 import uuid
-import tkinter as tk
 
-try:
-    import customtkinter as ctk
-    HAS_CTK = True
-except ImportError:
-    HAS_CTK = False
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import (
+    QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
+    QVBoxLayout, QWidget,
+)
 
 from core.base_app import ToolApp
 
@@ -39,6 +38,77 @@ ENCOURAGEMENTS = [
 
 STALE_DAYS = 3          # 超过几天未完成算"旧任务"
 SECONDS_PER_DAY = 86400
+
+
+class TaskRow(QFrame):
+    """单条任务行:点击标题区完成,右侧按钮删除/还原。"""
+
+    def __init__(self, t: dict, done: bool, stale: bool, days_old: int,
+                 on_complete, on_delete, on_restore, parent=None):
+        super().__init__(parent)
+        self.setObjectName("taskRow")
+        bg = "#232833" if not stale else "#2e2618"
+        border = "#e8a54b" if stale else "#2a2f3a"
+        self.setStyleSheet(f"""
+            QFrame#taskRow {{
+                background: {bg}; border: 1px solid {border}; border-radius: 10px;
+            }}
+            QFrame#taskRow QLabel {{ background: transparent; border: none; }}
+        """)
+
+        if done:
+            when = time.strftime("%m-%d %H:%M", time.localtime(t["done_at"]))
+            text = f"✔ {t['title']}"
+            sub = f"完成于 {when}"
+            color = "#5c6474"
+        else:
+            text = ("⚠ " if stale else "") + t["title"]
+            age = f" · {days_old}天前添加" if stale else ""
+            sub = (f"{time.strftime('%m-%d %H:%M', time.localtime(t['created']))} 创建{age}")
+            color = "#e8a54b" if stale else "#e6e9ef"
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 8, 8, 8)
+        lay.setSpacing(6)
+
+        texts = QVBoxLayout()
+        texts.setSpacing(1)
+        main_lb = QLabel(text)
+        main_lb.setStyleSheet(f"color: {color}; font-size: 14px;")
+        sub_lb = QLabel(sub)
+        sub_lb.setStyleSheet("color: #6a7385; font-size: 11px;")
+        texts.addWidget(main_lb)
+        texts.addWidget(sub_lb)
+        lay.addLayout(texts, 1)
+
+        if not done:
+            # 点标题即完成:文本区鼠标穿透到行容器
+            main_lb.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            sub_lb.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            self.setCursor(Qt.PointingHandCursor)
+            self._on_click = lambda: on_complete(t["id"])
+            ok = QPushButton("✔ 完成")
+            ok.setProperty("kind", "ok")
+            ok.setFixedSize(76, 26)
+            ok.clicked.connect(lambda: on_complete(t["id"]))
+            lay.addWidget(ok)
+        else:
+            self._on_click = None
+            rs = QPushButton("↩ 还原")
+            rs.setProperty("kind", "dim")
+            rs.setFixedSize(76, 26)
+            rs.clicked.connect(lambda: on_restore(t["id"]))
+            lay.addWidget(rs)
+
+        dele = QPushButton("🗑")
+        dele.setProperty("kind", "danger")
+        dele.setFixedSize(40, 26)
+        dele.clicked.connect(lambda: on_delete(t["id"]))
+        lay.addWidget(dele)
+
+    def mousePressEvent(self, ev):
+        if self._on_click and ev.button() == Qt.LeftButton:
+            self._on_click()
 
 
 class DailyTasksApp(ToolApp):
@@ -111,98 +181,101 @@ class DailyTasksApp(ToolApp):
         return int((time.time() - task["created"]) // SECONDS_PER_DAY)
 
     # ---------- UI ----------
-    def build(self, root: tk.Misc) -> None:
+    def build(self, root: QWidget) -> None:
         self.tasks = self._load()
-        self._toast_id = None
         self._page = "pending"
+        self._toast_widget: QLabel | None = None
 
-        self.wrap = self._frame(root, transparent=True)
-        self.wrap.pack(fill="both", expand=True, padx=8, pady=6)
+        wrap = QWidget(root)
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(8, 6, 8, 6)
+        outer.addWidget(wrap)
+
+        lay = QVBoxLayout(wrap)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
 
         # 顶部:添加 + 页面切换
-        top = self._frame(self.wrap, transparent=True)
-        top.pack(fill="x", pady=(0, 10))
+        top = QWidget()
+        top.setStyleSheet("background: transparent;")
+        tl = QHBoxLayout(top)
+        tl.setContentsMargins(0, 0, 0, 0)
+        tl.setSpacing(8)
 
-        self.entry_var = tk.StringVar()
-        self.entry = (ctk.CTkEntry(top, textvariable=self.entry_var, height=38,
-                                   corner_radius=9, placeholder_text="✏️ 输入任务,回车快速添加…",
-                                   font=ctk.CTkFont(size=14))
-                      if HAS_CTK else tk.Entry(top, textvariable=self.entry_var, font=("", 13)))
-        self.entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        self.entry.bind("<Return>", lambda _e: self._on_add())
-        self._btn(top, "＋ 添加", self._on_add, width=90).pack(side="left", padx=(0, 8))
-        self.pending_btn = self._btn(top, "📋 待办", lambda: self._switch("pending"), width=80)
-        self.pending_btn.pack(side="left", padx=(0, 4))
-        self.done_btn = self._btn(top, "✅ 已完成", lambda: self._switch("done"), width=90)
-        self.done_btn.pack(side="left")
+        self.entry = QLineEdit()
+        self.entry.setObjectName("searchBox")   # 复用主程序搜索框样式
+        self.entry.setFixedHeight(38)
+        self.entry.setPlaceholderText("✏️ 输入任务,回车快速添加…")
+        self.entry.returnPressed.connect(self._on_add)
+        tl.addWidget(self.entry, 1)
 
-        # 统计条
-        self.stats_label = self._label(self.wrap, "", 12, "#8a93a6")
-        self.stats_label.pack(anchor="w", pady=(0, 6))
+        add_btn = QPushButton("＋ 添加")
+        add_btn.setFixedWidth(90)
+        add_btn.clicked.connect(self._on_add)
+        tl.addWidget(add_btn)
+
+        self.pending_btn = QPushButton("📋 待办")
+        self.pending_btn.setFixedWidth(80)
+        self.pending_btn.clicked.connect(lambda: self._switch("pending"))
+        tl.addWidget(self.pending_btn)
+
+        self.done_btn = QPushButton("✅ 已完成")
+        self.done_btn.setFixedWidth(90)
+        self.done_btn.clicked.connect(lambda: self._switch("done"))
+        tl.addWidget(self.done_btn)
+        lay.addWidget(top)
+
+        # 统计条 + 提醒横幅
+        self.stats_label = QLabel("")
+        self.stats_label.setStyleSheet("color: #8a93a6; font-size: 12px;")
+        lay.addWidget(self.stats_label)
+
+        self.banner = QLabel("")
+        self.banner.setStyleSheet("color: #e8a54b; font-size: 13px;")
+        self.banner.hide()
+        lay.addWidget(self.banner)
 
         # 列表(滚动)
-        if HAS_CTK:
-            self.list_frame = ctk.CTkScrollableFrame(self.wrap, fg_color="transparent")
-        else:
-            outer = tk.Frame(self.wrap)
-            cv = tk.Canvas(outer, highlightthickness=0)
-            self.list_frame = tk.Frame(cv)
-            sb = tk.Scrollbar(outer, orient="vertical", command=cv.yview)
-            cv.configure(yscrollcommand=sb.set)
-            cv.create_window((0, 0), window=self.list_frame, anchor="nw")
-            self.list_frame.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
-            cv.pack(side="left", fill="both", expand=True); sb.pack(side="right", fill="y")
-            outer.pack(fill="both", expand=True)
-        if HAS_CTK:
-            self.list_frame.pack(fill="both", expand=True)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self.list_host = QWidget()
+        self.list_lay = QVBoxLayout(self.list_host)
+        self.list_lay.setContentsMargins(0, 0, 8, 0)
+        self.list_lay.setSpacing(6)
+        self.list_lay.addStretch(1)
+        scroll.setWidget(self.list_host)
+        lay.addWidget(scroll, 1)
 
-        # 提醒横幅
-        self.banner = self._label(self.wrap, "", 13, "#e8a54b")
-
+        self._update_page_buttons()
         self._render()
-
-    # ---- 控件工厂 ----
-    def _frame(self, parent, transparent=False, radius=0, fg=None):
-        if HAS_CTK:
-            kw = {"corner_radius": radius}
-            kw["fg_color"] = "transparent" if transparent else (fg or "#1e222c")
-            return ctk.CTkFrame(parent, **kw)
-        return tk.Frame(parent)
-
-    def _label(self, parent, text, size=13, color=None):
-        if HAS_CTK:
-            kw = {"font": ctk.CTkFont(size=size)}
-            if color:
-                kw["text_color"] = color
-            return ctk.CTkLabel(parent, text=text, **kw)
-        return tk.Label(parent, text=text, anchor="w", justify="left")
-
-    def _btn(self, parent, text, cmd, width=None, fg=None, hover=None):
-        if HAS_CTK:
-            kw = {"command": cmd, "corner_radius": 8}
-            if width: kw["width"] = width
-            if fg: kw["fg_color"] = fg
-            if hover: kw["hover_color"] = hover
-            return ctk.CTkButton(parent, text=text, **kw)
-        return tk.Button(parent, text=text, command=cmd)
 
     # ---- 交互 ----
     def _switch(self, page: str):
         self._page = page
-        hl = "#4f8cff" if HAS_CTK else None
-        dim = "#2a2f3a"
-        if HAS_CTK:
-            self.pending_btn.configure(fg_color=hl if page == "pending" else dim)
-            self.done_btn.configure(fg_color=hl if page == "done" else dim)
+        self._update_page_buttons()
         self._render()
 
+    def _update_page_buttons(self):
+        for btn, pg in ((self.pending_btn, "pending"), (self.done_btn, "done")):
+            btn.setProperty("kind", "page")
+            btn.setProperty("active", "true" if self._page == pg else "false")
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {"#4f8cff" if self._page == pg else "#2a2f3a"};
+                    color: {"white" if self._page == pg else "#e6e9ef"};
+                    border: none; border-radius: 8px; padding: 7px 10px; font-size: 13px;
+                }}
+                QPushButton:hover {{ background: {"#6ba0ff" if self._page == pg else "#3a4150"}; }}
+            """)
+
     def _on_add(self):
-        title = self.entry_var.get().strip()
+        title = self.entry.text().strip()
         if not title:
             return
         self.add_task(title)
-        self.entry_var.set("")
+        self.entry.clear()
         self._page = "pending"
+        self._update_page_buttons()
         self._render()
 
     def _on_complete(self, task_id: str):
@@ -221,117 +294,76 @@ class DailyTasksApp(ToolApp):
 
     # ---- 渲染 ----
     def _render(self):
-        for w in self.list_frame.winfo_children():
-            w.destroy()
+        # 清空旧行(保留末尾 stretch)
+        while self.list_lay.count() > 1:
+            item = self.list_lay.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
 
         pending = self.pending_tasks()
         done = self.done_tasks()
         stale = [t for t in pending if self.is_stale(t)]
 
-        self._set_text(self.stats_label,
-                       f"待办 {len(pending)} · 已完成 {len(done)}"
-                       + (f" · ⚠ 旧任务 {len(stale)}" if stale else ""))
+        self.stats_label.setText(
+            f"待办 {len(pending)} · 已完成 {len(done)}"
+            + (f" · ⚠ 旧任务 {len(stale)}" if stale else ""))
 
         if self._page == "pending":
             if stale:
-                self.banner.pack(anchor="w", pady=(0, 6)) if not self.banner.winfo_manager() else None
-                self._set_text(self.banner,
-                               f"⏰ 有 {len(stale)} 个任务超过 {STALE_DAYS} 天没完成了,优先处理一下吧!")
+                self.banner.setText(
+                    f"⏰ 有 {len(stale)} 个任务超过 {STALE_DAYS} 天没完成了,优先处理一下吧!")
+                self.banner.show()
             else:
-                self.banner.pack_forget()
-            if not pending:
-                self._empty("🎈 没有待办任务,享受这一刻的轻松!")
-                return
-            for t in pending:
-                self._task_row(t, done=False)
+                self.banner.hide()
+            items = [(t, False) for t in pending]
+            empty_msg = "🎈 没有待办任务,享受这一刻的轻松!"
         else:
-            self.banner.pack_forget()
-            if not done:
-                self._empty("还没有完成的任务,去待办页划掉第一条吧 💪")
-                return
-            for t in done:
-                self._task_row(t, done=True)
+            self.banner.hide()
+            items = [(t, True) for t in done]
+            empty_msg = "还没有完成的任务,去待办页划掉第一条吧 💪"
 
-    def _empty(self, text: str):
-        lb = self._label(self.list_frame, text, 14, "#5c6474")
-        lb.pack(pady=40)
+        if not items:
+            lab = QLabel(empty_msg)
+            lab.setStyleSheet("color: #5c6474; font-size: 14px;")
+            lab.setAlignment(Qt.AlignCenter)
+            lab.setFixedHeight(80)
+            self.list_lay.insertWidget(self.list_lay.count() - 1, lab)
+            return
 
-    def _task_row(self, t: dict, done: bool):
-        stale = self.is_stale(t)
-        if HAS_CTK:
-            row = ctk.CTkFrame(self.list_frame, corner_radius=10,
-                               fg_color="#232833" if not stale else "#2e2618",
-                               border_width=1,
-                               border_color="#e8a54b" if stale else "#2a2f3a")
-        else:
-            row = tk.Frame(self.list_frame, bg="#232833")
-        row.pack(fill="x", pady=3)
-
-        age = f" · {self.days_old(t)}天前添加" if stale else ""
-        if done:
-            when = time.strftime("%m-%d %H:%M", time.localtime(t["done_at"]))
-            text = f"✔ {t['title']}"
-            sub = f"完成于 {when}"
-            color = "#5c6474"
-        else:
-            text = ("⚠ " if stale else "") + t["title"]
-            sub = f"{time.strftime('%m-%d %H:%M', time.localtime(t['created']))} 创建{age}"
-            color = "#e8a54b" if stale else "#e6e9ef"
-
-        main_lb = self._label(row, text, 14, color)
-        main_lb.pack(anchor="w", padx=14, pady=(8, 0))
-        sub_lb = self._label(row, sub, 11, "#6a7385")
-        sub_lb.pack(anchor="w", padx=14, pady=(0, 8))
-
-        if not done:
-            # 点标题即完成
-            for w in (main_lb, sub_lb):
-                w.bind("<Button-1>", lambda _e, tid=t["id"]: self._on_complete(tid))
-                if HAS_CTK:
-                    w.configure(cursor="hand2")
-            self._btn(row, "🗑", lambda tid=t["id"]: self._on_delete(tid),
-                      width=40, fg="#3a2730", hover="#54353f").pack(side="right", padx=8, pady=8)
-            self._btn(row, "✔ 完成", lambda tid=t["id"]: self._on_complete(tid),
-                      width=76, fg="#27402e", hover="#35563e").pack(side="right", padx=(0, 4))
-        else:
-            self._btn(row, "🗑", lambda tid=t["id"]: self._on_delete(tid),
-                      width=40, fg="#3a2730", hover="#54353f").pack(side="right", padx=8, pady=8)
-            self._btn(row, "↩ 还原", lambda tid=t["id"]: self._on_restore(tid),
-                      width=76, fg="#2a2f3a", hover="#3a4150").pack(side="right", padx=(0, 4))
-
-    def _set_text(self, widget, text):
-        if HAS_CTK:
-            widget.configure(text=text)
-        else:
-            widget.config(text=text)
+        for t, is_done in items:
+            row = TaskRow(t, is_done, self.is_stale(t), self.days_old(t),
+                          self._on_complete, self._on_delete, self._on_restore)
+            self.list_lay.insertWidget(self.list_lay.count() - 1, row)
 
     # ---- 鼓励 toast ----
     def _show_toast(self, msg: str):
-        if self._toast_id:
-            try:
-                self._toast_id.destroy()
-            except Exception:
-                pass
-        top = self.wrap.winfo_toplevel()
-        if HAS_CTK:
-            t = ctk.CTkLabel(top, text=msg, corner_radius=12, fg_color="#27402e",
-                             text_color="#bfe8c8", font=ctk.CTkFont(size=15, weight="bold"),
-                             padx=22, pady=12, border_width=1, border_color="#35563e")
-        else:
-            t = tk.Label(top, text=msg, bg="#27402e", fg="#bfe8c8", padx=22, pady=12)
-        t.place(relx=0.5, rely=0.18, anchor="n")
-        self._toast_id = t
-        t.after(2800, self._fade_toast)
+        if self._toast_widget is not None:
+            self._toast_widget.deleteLater()
+            self._toast_widget = None
+        top = self.entry.window()
+        t = QLabel(msg, top)
+        t.setStyleSheet("""
+            QLabel {
+                background: #27402e; color: #bfe8c8; border: 1px solid #35563e;
+                border-radius: 12px; padding: 12px 22px;
+                font-size: 15px; font-weight: bold;
+            }
+        """)
+        t.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        t.adjustSize()
+        t.move((top.width() - t.width()) // 2, int(top.height() * 0.18))
+        t.show()
+        t.raise_()
+        self._toast_widget = t
+        QTimer.singleShot(2800, self._fade_toast)
 
     def _fade_toast(self):
-        t = self._toast_id
+        t = self._toast_widget
         if t is None:
             return
-        self._toast_id = None
-        try:
-            t.destroy()
-        except Exception:
-            pass
+        self._toast_widget = None
+        t.deleteLater()
 
     def on_close(self):
         self._save()

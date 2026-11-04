@@ -1,3 +1,9 @@
-customtkinter>=5.2
+# 核心依赖（主程序 + 搜索）
+PySide6-Essentials>=6.6
 rapidfuzz>=3.0
+
+# 音频播放器插件（apps/audio_player.py）
+numpy>=1.24
+sounddevice>=0.4
+
 # 打包为 exe 时额外安装: pyinstaller

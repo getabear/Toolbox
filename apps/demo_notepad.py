@@ -1,50 +1,57 @@
 """示例 App:便签(演示如何接入工具箱,真实工具照此模板写)。"""
 from __future__ import annotations
 
-import tkinter as tk
 from pathlib import Path
 
-try:
-    import customtkinter as ctk
-    HAS_CTK = True
-except ImportError:
-    HAS_CTK = False
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont, QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
+)
 
 from core.base_app import ToolApp
 
 
 class NotepadApp(ToolApp):
-    def build(self, root: tk.Misc) -> None:
+    def build(self, root: QWidget) -> None:
         file: Path = self.data_path("notes.txt")
 
-        if HAS_CTK:
-            frame = ctk.CTkFrame(root, fg_color="transparent")
-            frame.pack(fill="both", expand=True, padx=16, pady=16)
-            text = ctk.CTkTextbox(frame, wrap="word", font=("Microsoft YaHei UI", 14))
-            text.pack(fill="both", expand=True)
-            status = ctk.CTkLabel(frame, text="", anchor="w")
-            status.pack(fill="x", pady=(6, 0))
-        else:
-            frame = tk.Frame(root)
-            frame.pack(fill="both", expand=True, padx=16, pady=16)
-            text = tk.Text(frame, wrap="word", font=("Microsoft YaHei UI", 14))
-            text.pack(fill="both", expand=True)
-            status = tk.Label(frame, text="", anchor="w")
-            status.pack(fill="x", pady=(6, 0))
+        frame = QWidget(root)
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(16, 16, 16, 16)
+        outer.addWidget(frame)
+
+        lay = QVBoxLayout(frame)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+
+        text = QPlainTextEdit(frame)  # 默认按词换行
+        f = QFont("Microsoft YaHei UI", 12)
+        text.setFont(f)
+        lay.addWidget(text, 1)
+
+        status = QLabel("")
+        status.setStyleSheet("color: #8a93a6;")
+        lay.addWidget(status)
 
         if file.exists():
-            text.insert("1.0", file.read_text("utf-8"))
+            text.setPlainText(file.read_text("utf-8"))
 
-        def save(_=None):
-            file.write_text(text.get("1.0", "end-1c"), "utf-8")
-            status.configure(text=f"已保存到 {file}")
+        def save():
+            file.write_text(text.toPlainText(), "utf-8")
+            status.setText(f"已保存到 {file}")
             self.log.info("notes saved, %d bytes", file.stat().st_size)
 
-        if HAS_CTK:
-            ctk.CTkButton(frame, text="保存", command=save, width=90).pack(anchor="e", pady=(8, 0))
-        else:
-            tk.Button(frame, text="保存", command=save).pack(anchor="e", pady=(8, 0))
-        root.bind("<Control-s>", save)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        save_btn = QPushButton("保存")
+        save_btn.setFixedWidth(90)
+        save_btn.setCursor(Qt.PointingHandCursor)
+        save_btn.clicked.connect(save)
+        btn_row.addWidget(save_btn)
+        lay.addLayout(btn_row)
+
+        QShortcut(QKeySequence("Ctrl+S"), root, activated=save)
 
     def on_close(self) -> None:
         self.log.info("notepad closed")
