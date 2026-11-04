@@ -1,18 +1,16 @@
 @echo off
-REM Windows 一键打包脚本
-REM 需要: pip install -r requirements.txt pyinstaller
-REM 用法: 双击运行或在命令行执行 build.bat
+REM Windows build script for Toolbox.exe (PyInstaller one-file).
+REM Pure ASCII + CRLF on purpose: cmd parses bat as GBK, Chinese text
+REM and broken line-continuation (^) will silently wreck the whole script.
 chcp 65001 >nul
 cd /d %~dp0
-pip install pyinstaller customtkinter rapidfuzz numpy sounddevice
-pyinstaller --noconfirm --onefile --windowed --name Toolbox ^
-  --collect-all customtkinter ^
-  --collect-submodules apps ^
-  --collect-submodules core ^
-  --hidden-import sounddevice ^
-  --hidden-import numpy ^
-  --hidden-import rapidfuzz ^
-  main.py
-echo.
-echo 完成! 可执行文件在 dist\Toolbox.exe
+if exist Toolbox.spec del Toolbox.spec
+.venv\Scripts\python.exe -m pip install pyinstaller PySide6-Essentials rapidfuzz numpy sounddevice
+.venv\Scripts\python.exe -m PyInstaller --noconfirm --onefile --windowed --name Toolbox --icon toolbox.ico --add-data "toolbox.ico;." --collect-submodules apps --collect-submodules core --hidden-import sounddevice --hidden-import numpy --hidden-import rapidfuzz main.py
+if errorlevel 1 (
+  echo BUILD FAILED
+  pause
+  exit /b 1
+)
+echo Done. Executable is at dist\Toolbox.exe
 pause

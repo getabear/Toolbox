@@ -1,5 +1,5 @@
 """
-Toolbox 主程序 —— 现代化图形界面 (CustomTkinter)。
+Toolbox 主程序 —— 现代化图形界面 (PySide6 / Qt)。
 
 布局:
 ┌──────────┬─────────────────────────────────┐
@@ -10,28 +10,116 @@ Toolbox 主程序 —— 现代化图形界面 (CustomTkinter)。
 │          │  (点击卡片 → 右侧/全屏运行工具)   │
 └──────────┴─────────────────────────────────┘
 
-Windows 运行:  python main.py
+运行:  pip install -r requirements.txt && python main.py
 """
 from __future__ import annotations
 
-import os
 import sys
-import tkinter as tk
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 try:
-    import customtkinter as ctk
-    HAS_CTK = True
+    from PySide6.QtCore import Qt, QUrl, QTimer, Signal
+    from PySide6.QtGui import QDesktopServices, QFont, QIcon
+    from PySide6.QtWidgets import (
+        QApplication, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
+        QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea,
+        QStackedWidget, QVBoxLayout, QWidget,
+    )
 except ImportError:
-    HAS_CTK = False
+    sys.stderr.write("缺少 PySide6,请先执行: pip install PySide6-Essentials\n")
+    raise
 
 from core import EnvManager, Registry, SearchEngine, Manifest, human_size
 from core.env_manager import default_root as main_env_default_root
 
 ACCENT = "#4f8cff"
+SIDEBAR_BG = "#1a1d24"
+MAIN_BG = "#12141a"
+CARD_BG = "#1e222c"
+CARD_HOVER = "#252b38"
+CARD_BORDER = "#2a2f3a"
+TEXT_MAIN = "#e6e9ef"
+TEXT_DIM = "#8a93a6"
+TEXT_MID = "#9aa3b5"
+GREEN = "#5cbf7a"
+ORANGE = "#e8a54b"
+
+# 全局样式:hover/圆角全部交给 Qt 样式表(原生渲染,不再像 Tk 那样软件重绘)
+GLOBAL_QSS = f"""
+QMainWindow {{ background: {MAIN_BG}; }}
+QWidget#mainArea {{ background: {MAIN_BG}; }}
+QFrame#sidebar {{ background: {SIDEBAR_BG}; }}
+QLabel {{ color: {TEXT_MAIN}; background: transparent; }}
+QLineEdit#searchBox {{
+    background: {CARD_BG}; border: 1px solid {CARD_BORDER}; border-radius: 10px;
+    padding: 8px 14px; color: {TEXT_MAIN}; font-size: 14px;
+    selection-background-color: {ACCENT};
+}}
+QLineEdit#searchBox:focus {{ border-color: {ACCENT}; }}
+QPushButton {{
+    background: {ACCENT}; color: white; border: none; border-radius: 8px;
+    padding: 7px 16px; font-size: 13px;
+}}
+QPushButton:hover {{ background: #6ba0ff; }}
+QPushButton:pressed {{ background: #3d7ae8; }}
+QPushButton[kind="nav"] {{
+    background: transparent; color: {TEXT_MAIN}; text-align: left;
+    border-radius: 8px; padding: 8px 14px; font-size: 14px;
+}}
+QPushButton[kind="nav"]:hover {{ background: #2a2f3a; }}
+QPushButton[kind="dim"] {{ background: #2a2f3a; color: {TEXT_MAIN}; }}
+QPushButton[kind="dim"]:hover {{ background: #3a4150; }}
+QPushButton[kind="danger"] {{ background: #5a2730; color: {TEXT_MAIN}; }}
+QPushButton[kind="danger"]:hover {{ background: #7a3540; }}
+QPushButton[kind="ok"] {{ background: #27402e; color: {TEXT_MAIN}; }}
+QPushButton[kind="ok"]:hover {{ background: #35563e; }}
+QFrame#panel {{ background: {CARD_BG}; border: none; border-radius: 12px; }}
+QLabel#toast {{
+    background: #2a2f3a; color: {TEXT_MAIN}; border-radius: 8px;
+    padding: 8px 14px; font-size: 13px;
+}}
+QScrollArea {{ border: none; background: transparent; }}
+QScrollArea > QWidget > QWidget {{ background: transparent; }}
+QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
+QScrollBar::handle:vertical {{ background: #2a2f3a; border-radius: 4px; min-height: 30px; }}
+QScrollBar::handle:vertical:hover {{ background: #3a4150; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QScrollBar:horizontal {{ background: transparent; height: 8px; margin: 0; }}
+QScrollBar::handle:horizontal {{ background: #2a2f3a; border-radius: 4px; min-width: 30px; }}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+QComboBox {{
+    background: {CARD_BG}; color: {TEXT_MAIN}; border: 1px solid {CARD_BORDER};
+    border-radius: 7px; padding: 5px 10px; min-height: 20px;
+}}
+QComboBox:hover {{ border-color: {ACCENT}; }}
+QComboBox::drop-down {{ border: none; width: 22px; }}
+QComboBox QAbstractItemView {{
+    background: {CARD_BG}; color: {TEXT_MAIN};
+    selection-background-color: {ACCENT}; selection-color: white;
+    border: 1px solid {CARD_BORDER}; outline: none;
+}}
+QComboBox QAbstractItemView::item {{
+    min-height: 26px; padding: 2px 10px;
+    background: {CARD_BG}; color: {TEXT_MAIN};
+}}
+QComboBox QAbstractItemView::item:hover {{ background: {CARD_HOVER}; }}
+QComboBox QAbstractItemView::item:selected {{ background: {ACCENT}; color: white; }}
+QPlainTextEdit, QTextEdit {{
+    background: {CARD_BG}; color: {TEXT_MAIN}; border: 1px solid {CARD_BORDER};
+    border-radius: 10px; padding: 8px; selection-background-color: {ACCENT};
+}}
+QSlider::groove:horizontal {{ height: 6px; background: #2a2f3a; border-radius: 3px; }}
+QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 3px; }}
+QSlider::handle:horizontal {{
+    width: 14px; height: 14px; margin: -4px 0;
+    background: {ACCENT}; border-radius: 7px;
+}}
+QSlider::handle:horizontal:hover {{ background: #6ba0ff; }}
+QMessageBox {{ background: {MAIN_BG}; }}
+"""
 
 # ---- 内置工具清单(先注册占位,后续逐个实现)----
 BUILTIN_APPS: list[dict] = [
@@ -83,13 +171,12 @@ def seed_registry(reg: Registry) -> dict:
                 print(f"[warn] 注册 {d['id']} 失败: {e}")
     return reg.sync_plugins()
 
-
 # 插件模板(「生成插件模板」按钮写入插件目录,新手照着改即可)
 PLUGIN_TEMPLATE = '''# -*- coding: utf-8 -*-
 """Toolbox 插件示例:掷骰子。复制此文件到插件目录,改成你自己的工具。"""
 import random
-import tkinter as tk
-import customtkinter as ctk
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout
 
 # ① 元数据:id 全局唯一(小写字母/数字/下划线),description 写清楚功能(搜索靠它)
 MANIFEST = {
@@ -113,27 +200,35 @@ except ImportError:  # 开发调试时
 
 class HelloPlugin(ToolApp):
     def build(self, root):
-        """root 是你的界面容器,随意布局。"""
-        frame = ctk.CTkFrame(root, fg_color="transparent")
-        frame.pack(fill="both", expand=True, padx=16, pady=16)
+        """root 是你的界面容器(QWidget),自己给它设置布局,随意发挥。"""
+        lay = QVBoxLayout(root)
+        lay.setContentsMargins(16, 16, 16, 16)
 
-        self.result = ctk.CTkLabel(frame, text="🎲", font=ctk.CTkFont(size=64))
-        self.result.pack(pady=20)
+        self.result = QLabel("🎲")
+        f = self.result.font(); f.setPointSize(48); self.result.setFont(f)
+        self.result.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self.result)
+        lay.addSpacing(20)
 
         # ③ 数据存取:一律走 self.env(受管沙箱),别写死路径
         cfg = self.env.get_config({"rolls": 0})
-        self.count = ctk.CTkLabel(frame, text=f"历史掷骰 {cfg.get(\'rolls\', 0)} 次",
-                                  text_color="#8a93a6")
-        self.count.pack()
+        self.count = QLabel(f"历史掷骰 {cfg.get('rolls', 0)} 次")
+        self.count.setStyleSheet("color: #8a93a6;")
+        self.count.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self.count)
 
         def roll():
             n = random.randint(1, 6)
-            self.result.configure(text=["⚀","⚁","⚂","⚃","⚄","⚅"][n-1])
+            self.result.setText(["⚀","⚁","⚂","⚃","⚄","⚅"][n-1])
             cfg["rolls"] = cfg.get("rolls", 0) + 1
             self.env.save_config(cfg)
-            self.count.configure(text=f"历史掷骰 {cfg[\'rolls\']} 次")
+            self.count.setText(f"历史掷骰 {cfg['rolls']} 次")
 
-        ctk.CTkButton(frame, text="掷!", width=120, height=38, command=roll).pack(pady=12)
+        btn = QPushButton("掷!")
+        btn.setFixedSize(120, 38)
+        btn.clicked.connect(roll)
+        lay.addWidget(btn, 0, Qt.AlignHCenter)
+        lay.addStretch(1)
 
     def on_close(self):
         """可选:窗口关闭时清理/保存。"""
@@ -141,527 +236,697 @@ class HelloPlugin(ToolApp):
 '''
 
 
-if HAS_CTK:
-    class ToolboxApp(ctk.CTk):
-        def __init__(self):
-            super().__init__()
-            ctk.set_appearance_mode("dark")
-            ctk.set_default_color_theme("blue")
-            self.title("Toolbox 工具箱")
-            self.geometry("1080x680")
-            self.minsize(860, 540)
+class ToolCard(QFrame):
+    """首页工具卡片。hover 高亮由样式表处理;子 Label 鼠标穿透,点击统一落在卡片上。"""
 
-            self.env = EnvManager.instance()
-            self.registry = Registry(self.env)
-            self._plugin_report = seed_registry(self.registry)
-            self.search_engine = SearchEngine(self.registry.all())
-            self._arrange_mode = False
+    clicked = Signal(str)          # 普通模式:启动;排版模式:左移
+    right_clicked = Signal(str)    # 排版模式:右移
 
-            self._build_layout()
-            self._show_home()
+    def __init__(self, m: Manifest, reason: str = "",
+                 arrange_mode: bool = False, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.app_id = m.id
+        self._arrange = arrange_mode
+        self.setObjectName("toolCard")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumHeight(150)
 
-        # ---------- 布局 ----------
-        def _build_layout(self):
-            self.grid_columnconfigure(1, weight=1)
-            self.grid_rowconfigure(0, weight=1)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 14, 16, 10)
+        lay.setSpacing(2)
 
-            # 侧边栏
-            self.sidebar = ctk.CTkFrame(self, width=190, corner_radius=0,
-                                        fg_color="#1a1d24")
-            self.sidebar.grid(row=0, column=0, sticky="nsw")
-            self.sidebar.grid_propagate(False)
+        icon = QLabel(m.icon)
+        f = icon.font(); f.setPointSize(22); icon.setFont(f)
+        lay.addWidget(icon)
 
-            ctk.CTkLabel(self.sidebar, text="🧰 Toolbox",
-                         font=ctk.CTkFont(size=22, weight="bold")).pack(pady=(24, 4), padx=16, anchor="w")
-            ctk.CTkLabel(self.sidebar, text="受管 · 可搜索 · 可扩展",
-                         font=ctk.CTkFont(size=11), text_color="#8a93a6").pack(padx=16, anchor="w")
+        name = QLabel(m.name)
+        f = name.font(); f.setPointSize(12); f.setBold(True); name.setFont(f)
+        lay.addWidget(name)
 
-            self.nav_buttons: list[ctk.CTkButton] = []
-            self.sidebar_items = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-            self.sidebar_items.pack(fill="both", expand=True)
-            self._rebuild_sidebar()
+        cat = QLabel(m.category + ("  · 插件" if m.source == "plugin" else ""))
+        cat.setStyleSheet(f"color: {ACCENT}; font-size: 11px;")
+        lay.addWidget(cat)
 
-            # 主区域
-            self.main = ctk.CTkFrame(self, corner_radius=0, fg_color="#12141a")
-            self.main.grid(row=0, column=1, sticky="nsew")
-            self.main.grid_rowconfigure(1, weight=1)
-            self.main.grid_columnconfigure(0, weight=1)
+        desc_text = m.description if len(m.description) <= 46 else m.description[:45] + "…"
+        desc = QLabel(desc_text)
+        desc.setWordWrap(True)
+        desc.setStyleSheet(f"color: {TEXT_MID}; font-size: 12px;")
+        lay.addWidget(desc)
 
-            # 搜索栏
-            top = ctk.CTkFrame(self.main, fg_color="transparent")
-            top.grid(row=0, column=0, sticky="ew", padx=20, pady=(16, 8))
-            top.grid_columnconfigure(0, weight=1)
+        if arrange_mode:
+            mv = QWidget()
+            mv.setStyleSheet("background: transparent;")
+            hl = QHBoxLayout(mv)
+            hl.setContentsMargins(0, 6, 0, 0)
+            hl.setSpacing(6)
+            left = QPushButton("← 左移")
+            right = QPushButton("右移 →")
+            for b in (left, right):
+                b.setProperty("kind", "dim")
+                b.setFixedSize(70, 26)
+                b.setCursor(Qt.ArrowCursor)
+            left.clicked.connect(lambda: self.clicked.emit(self.app_id))
+            right.clicked.connect(lambda: self.right_clicked.emit(self.app_id))
+            hl.addWidget(left)
+            hl.addWidget(right)
+            hl.addStretch(1)
+            lay.addWidget(mv)
+        elif reason:
+            r = QLabel(f"✓ {reason}")
+            r.setStyleSheet(f"color: {GREEN}; font-size: 10px;")
+            lay.addWidget(r)
+        else:
+            v = QLabel(f"v{m.version}")
+            v.setStyleSheet("color: #5c6474; font-size: 10px;")
+            lay.addWidget(v)
+        lay.addStretch(1)
 
-            self.search_var = tk.StringVar()
-            self.search_var.trace_add("write", lambda *_: self._on_search())
-            self.search_entry = ctk.CTkEntry(
-                top, textvariable=self.search_var, height=40, corner_radius=10,
-                placeholder_text="🔍  搜索工具:输入关键字,或用自然语言描述,如「能把图片压小一点的」",
-                font=ctk.CTkFont(size=14))
-            self.search_entry.grid(row=0, column=0, sticky="ew")
+        # 子 Label 鼠标穿透 → hover/点击统一落在卡片上(替代 tk 版递归绑定)
+        for w in self.findChildren(QLabel):
+            w.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
-            # 内容区
-            self.content = ctk.CTkFrame(self.main, fg_color="transparent")
-            self.content.grid(row=1, column=0, sticky="nsew", padx=20, pady=(4, 16))
-            self.content.grid_rowconfigure(0, weight=1)
-            self.content.grid_columnconfigure(0, weight=1)
+        border = ACCENT if arrange_mode else CARD_BORDER
+        self.setStyleSheet(f"""
+            QFrame#toolCard {{
+                background: {CARD_BG}; border: 1px solid {border}; border-radius: 14px;
+            }}
+            QFrame#toolCard:hover {{ background: {CARD_HOVER}; border-color: {ACCENT}; }}
+            QFrame#toolCard QLabel {{ background: transparent; border: none; }}
+        """)
 
-            # 运行中工具容器
-            self.tool_host = ctk.CTkFrame(self.main, fg_color="transparent")
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.LeftButton:
+            self.clicked.emit(self.app_id)
+        elif ev.button() == Qt.RightButton and self._arrange:
+            self.right_clicked.emit(self.app_id)
 
-        def _rebuild_sidebar(self):
-            """重建侧边栏导航(分类变化后调用,如安装/卸载插件)。"""
-            for w in self.sidebar_items.winfo_children():
-                w.destroy()
-            self.nav_buttons = []
-            self._nav_button("🏠  首页", self._show_home)
 
-            cats = self.registry.categories()
-            if cats:
-                ctk.CTkLabel(self.sidebar_items, text="分类", font=ctk.CTkFont(size=12, weight="bold"),
-                             text_color="#8a93a6").pack(pady=(20, 4), padx=16, anchor="w")
-                for c in cats:
-                    self._nav_button(f"▸  {c}", lambda cc=c: self._show_home(category=cc))
+class ToolboxWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Toolbox 工具箱")
+        self.resize(1080, 680)
+        self.setMinimumSize(860, 540)
 
-            ctk.CTkLabel(self.sidebar_items, text="系统", font=ctk.CTkFont(size=12, weight="bold"),
-                         text_color="#8a93a6").pack(pady=(20, 4), padx=16, anchor="w")
-            self._nav_button("🧩  插件管理", self._show_plugins_page)
-            self._nav_button("🗂  环境管理", self._show_env_page)
+        self.env = EnvManager.instance()
+        self.registry = Registry(self.env)
+        self._plugin_report = seed_registry(self.registry)
+        self.search_engine = SearchEngine(self.registry.all())
+        self._arrange_mode = False
+        self._app_pages: dict[str, QWidget] = {}    # 已构建的工具页(缓存复用)
+        self._launched_apps: list = []              # 关闭时逐个 on_close
+        self._search_timer = QTimer(self)           # 搜索防抖:停止输入 180ms 才渲染
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(180)
+        self._search_timer.timeout.connect(self._do_search)
 
-        def _nav_button(self, text: str, command) -> ctk.CTkButton:
-            btn = ctk.CTkButton(self.sidebar_items, text=text, anchor="w", height=36,
-                                corner_radius=8, fg_color="transparent",
-                                hover_color="#2a2f3a", font=ctk.CTkFont(size=14),
-                                command=command)
-            btn.pack(fill="x", padx=10, pady=2)
-            self.nav_buttons.append(btn)
-            return btn
+        self.setStyleSheet(GLOBAL_QSS)
+        self._build_layout()
+        self._show_home()
 
-        # ---------- 页面 ----------
-        def _clear_content(self):
-            for w in self.content.winfo_children():
-                w.destroy()
-            self.tool_host.grid_forget()
-            for w in self.tool_host.winfo_children():
-                w.destroy()
-            # 关键:用完整 grid 参数重新布局,否则会丢 row/sticky/pad 导致黑屏错位
-            self.content.grid(row=1, column=0, sticky="nsew", padx=20, pady=(4, 16))
+    # ---------- 布局 ----------
+    def _build_layout(self):
+        central = QWidget()
+        central.setObjectName("mainArea")
+        self.setCentralWidget(central)
+        root_lay = QHBoxLayout(central)
+        root_lay.setContentsMargins(0, 0, 0, 0)
+        root_lay.setSpacing(0)
 
-        def _show_home(self, category: str | None = None):
-            # 先抑制 trace:清空搜索框会触发 _on_search,导致重复渲染(叠影/花屏)
-            self._suppress_search = True
-            self.search_var.set("")
-            self._suppress_search = False
-            self._clear_content()
-            apps = self.registry.all()
-            if category:
-                apps = [m for m in apps if m.category == category]
-            title = f"全部工具 · {category}" if category else "全部工具"
-            self._render_cards(title, apps)
+        # 侧边栏
+        self.sidebar = QFrame()
+        self.sidebar.setObjectName("sidebar")
+        self.sidebar.setFixedWidth(190)
+        sb = QVBoxLayout(self.sidebar)
+        sb.setContentsMargins(16, 24, 16, 16)
+        sb.setSpacing(2)
 
-        def _on_search(self):
-            if getattr(self, "_suppress_search", False):
-                return
-            q = self.search_var.get()
-            self._clear_content()
-            if not q.strip():
-                self._render_cards("全部工具", self.registry.all())
-                return
-            results = self.search_engine.search(q)
-            if results:
-                self._render_cards(f"「{q}」的搜索结果 · {len(results)} 项",
-                                   [r.manifest for r in results],
-                                   reasons={r.manifest.id: r.reason for r in results})
-            else:
-                ctk.CTkLabel(self.content, text=f"😕 没有找到与「{q}」相关的工具\n试试换个说法?",
-                             font=ctk.CTkFont(size=16), text_color="#8a93a6").grid(pady=60)
+        title = QLabel("🧰 Toolbox")
+        f = title.font(); f.setPointSize(16); f.setBold(True); title.setFont(f)
+        sb.addWidget(title)
+        sub = QLabel("受管 · 可搜索 · 可扩展")
+        sub.setStyleSheet(f"color: {TEXT_DIM}; font-size: 11px;")
+        sb.addWidget(sub)
+        sb.addSpacing(12)
 
-        def _render_cards(self, title: str, apps: list[Manifest], reasons: dict | None = None):
-            header = ctk.CTkFrame(self.content, fg_color="transparent")
-            header.grid(row=0, column=0, sticky="ew", columnspan=4, pady=(0, 10))
-            ctk.CTkLabel(header, text=title, anchor="w",
-                         font=ctk.CTkFont(size=18, weight="bold")).pack(side="left")
-            if self._arrange_mode:
-                ctk.CTkButton(header, text="✔ 完成排版", width=110,
-                              fg_color="#27402e", hover_color="#35563e",
-                              command=self._toggle_arrange).pack(side="right")
-                ctk.CTkLabel(header, text="用 ← → 调整工具位置,顺序自动保存",
-                             font=ctk.CTkFont(size=12),
-                             text_color="#8a93a6").pack(side="right", padx=12)
-            else:
-                ctk.CTkButton(header, text="↕ 排版", width=70, fg_color="#2a2f3a",
-                              hover_color="#3a4150",
-                              command=self._toggle_arrange).pack(side="right")
+        self.sidebar_items = QWidget()
+        self.sidebar_items.setStyleSheet("background: transparent;")
+        self.sidebar_items_lay = QVBoxLayout(self.sidebar_items)
+        self.sidebar_items_lay.setContentsMargins(0, 0, 0, 0)
+        self.sidebar_items_lay.setSpacing(2)
+        sb.addWidget(self.sidebar_items, 1)
+        self._rebuild_sidebar()
+        root_lay.addWidget(self.sidebar)
 
-            grid = ctk.CTkScrollableFrame(self.content, fg_color="transparent")
-            grid.grid(row=1, column=0, sticky="nsew", columnspan=4)
-            self.content.grid_rowconfigure(1, weight=1)
-            for i in range(4):
-                grid.grid_columnconfigure(i, weight=1, uniform="card")
+        # 主区域
+        main = QWidget()
+        main.setObjectName("mainArea")
+        ml = QVBoxLayout(main)
+        ml.setContentsMargins(20, 16, 20, 16)
+        ml.setSpacing(8)
 
-            for idx, m in enumerate(apps):
-                r, c = divmod(idx, 4)
-                self._tool_card(grid, m, r, c, (reasons or {}).get(m.id, ""),
-                                arrangeable=not reasons)
+        self.search_box = QLineEdit()
+        self.search_box.setObjectName("searchBox")
+        self.search_box.setFixedHeight(40)
+        self.search_box.setPlaceholderText(
+            "🔍  搜索工具:输入关键字,或用自然语言描述,如「能把图片压小一点的」")
+        self.search_box.textChanged.connect(self._on_search_text)
+        ml.addWidget(self.search_box)
 
-            if not apps:
-                ctk.CTkLabel(grid, text="暂无工具。点侧边栏「🧩 插件管理」安装第三方工具,\n或在 main.py 的 BUILTIN_APPS 中注册内置工具。",
-                             text_color="#8a93a6").grid(row=0, column=0, columnspan=4, pady=40)
+        self.stack = QStackedWidget()
+        ml.addWidget(self.stack, 1)
+        root_lay.addWidget(main, 1)
 
-        def _toggle_arrange(self):
-            self._arrange_mode = not self._arrange_mode
-            self._suppress_search = True
-            q = self.search_var.get()
-            self._suppress_search = False
-            if q.strip():
-                self._on_search()
-            else:
-                self._show_home()
+    def _rebuild_sidebar(self):
+        """重建侧边栏导航(分类变化后调用,如安装/卸载插件)。"""
+        lay = self.sidebar_items_lay
+        while lay.count():
+            item = lay.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
 
-        def _move_app(self, app_id: str, delta: int):
-            if self.registry.move_app(app_id, delta):
-                self.search_engine.update(self.registry.all())
-                self._suppress_search = True
-                q = self.search_var.get()
-                self._suppress_search = False
-                if q.strip():
-                    self._on_search()
-                else:
-                    self._show_home()
+        self._nav_button("🏠  首页", self._show_home)
+        cats = self.registry.categories()
+        if cats:
+            lab = QLabel("分类")
+            f = lab.font(); f.setBold(True); lab.setFont(f)
+            lab.setStyleSheet(f"color: {TEXT_DIM}; font-size: 12px;")
+            lay.addSpacing(16)
+            lay.addWidget(lab)
+            for c in cats:
+                self._nav_button(f"▸  {c}", lambda _=False, cc=c: self._show_home(category=cc))
 
-        def _tool_card(self, parent, m: Manifest, row: int, col: int, reason: str,
-                       arrangeable: bool = False):
-            CARD_BG, CARD_HOVER = "#1e222c", "#252b38"
-            card = ctk.CTkFrame(parent, corner_radius=14, fg_color=CARD_BG,
-                                border_width=1,
-                                border_color="#4f8cff" if self._arrange_mode else "#2a2f3a")
-            card.grid(row=row, column=col, sticky="nsew", padx=8, pady=8)
+        lab = QLabel("系统")
+        f = lab.font(); f.setBold(True); lab.setFont(f)
+        lab.setStyleSheet(f"color: {TEXT_DIM}; font-size: 12px;")
+        lay.addSpacing(16)
+        lay.addWidget(lab)
+        self._nav_button("🧩  插件管理", self._show_plugins_page)
+        self._nav_button("🗂  环境管理", self._show_env_page)
+        lay.addStretch(1)
 
-            # 手动实现悬停高亮(CTkFrame 不支持 hover_color)
-            def _hover_on(_e):
-                card.configure(fg_color=CARD_HOVER)
-            def _hover_off(_e):
-                card.configure(fg_color=CARD_BG)
+    def _nav_button(self, text: str, command) -> QPushButton:
+        btn = QPushButton(text)
+        btn.setProperty("kind", "nav")
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.clicked.connect(command)
+        self.sidebar_items_lay.addWidget(btn)
+        return btn
 
-            # 排版模式的移动按钮子树:不能被 _wire 重复绑定点击
-            # (否则点「右移」会同时触发 command(+1) 和 card 的 Button-1 绑定(-1),净移动为0)
-            self._arrange_btn_zone = None
+    # ---------- 页面切换 ----------
+    def _set_page(self, widget: QWidget):
+        cur = self.stack.currentWidget()
+        if cur is widget:
+            return
+        if cur is not None:
+            self.stack.removeWidget(cur)
+            # 工具页有缓存要复用;首页/管理页是临时构建的,直接销毁
+            if not any(cur is w for w in self._app_pages.values()):
+                cur.deleteLater()
+        self.stack.addWidget(widget)
+        self.stack.setCurrentWidget(widget)
 
-            def _wire(w):
-                if w is self._arrange_btn_zone:
-                    return  # 跳过移动按钮区域,由按钮自己的 command 处理
-                if self._arrange_mode and arrangeable:
-                    w.bind("<Button-1>", lambda _e, mid=m.id: self._move_app(mid, -1))
-                    w.bind("<Button-3>", lambda _e, mid=m.id: self._move_app(mid, 1))
-                else:
-                    w.bind("<Button-1>", lambda _e, mid=m.id: self._launch(mid))
-                w.bind("<Enter>", _hover_on, add="+")
-                w.bind("<Leave>", _hover_off, add="+")
-                for c in w.winfo_children():
-                    _wire(c)
+    # ---------- 首页 / 搜索 ----------
+    def _show_home(self, category: str | None = None):
+        self.search_box.blockSignals(True)
+        self.search_box.clear()
+        self.search_box.blockSignals(False)
+        self._search_timer.stop()
+        apps = self.registry.all()
+        if category:
+            apps = [m for m in apps if m.category == category]
+        title = f"全部工具 · {category}" if category else "全部工具"
+        self._set_page(self._build_cards_page(title, apps))
 
-            ctk.CTkLabel(card, text=m.icon, font=ctk.CTkFont(size=30)).pack(anchor="w", padx=16, pady=(14, 2))
-            ctk.CTkLabel(card, text=m.name, font=ctk.CTkFont(size=15, weight="bold"),
-                         anchor="w").pack(anchor="w", padx=16)
-            ctk.CTkLabel(card, text=m.category + ("  · 插件" if m.source == "plugin" else ""),
-                         font=ctk.CTkFont(size=11),
-                         text_color=ACCENT, anchor="w").pack(anchor="w", padx=16)
-            desc = m.description if len(m.description) <= 46 else m.description[:45] + "…"
-            ctk.CTkLabel(card, text=desc, font=ctk.CTkFont(size=12),
-                         text_color="#9aa3b5", anchor="w", justify="left",
-                         wraplength=170).pack(anchor="w", padx=16, pady=(6, 4))
+    def _on_search_text(self, _text: str):
+        self._search_timer.start()   # 防抖:连续输入时不重复渲染
+
+    def _do_search(self):
+        q = self.search_box.text().strip()
+        if not q:
+            self._set_page(self._build_cards_page("全部工具", self.registry.all()))
+            return
+        results = self.search_engine.search(q)
+        if results:
+            self._set_page(self._build_cards_page(
+                f"「{q}」的搜索结果 · {len(results)} 项",
+                [r.manifest for r in results],
+                reasons={r.manifest.id: r.reason for r in results}))
+        else:
+            page = QWidget()
+            lay = QVBoxLayout(page)
+            lab = QLabel(f"😕 没有找到与「{q}」相关的工具\n试试换个说法?")
+            lab.setStyleSheet(f"color: {TEXT_DIM}; font-size: 16px;")
+            lab.setAlignment(Qt.AlignCenter)
+            lay.addWidget(lab)
+            self._set_page(page)
+
+    def _build_cards_page(self, title: str, apps: list[Manifest],
+                          reasons: dict | None = None) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
+
+        header = QWidget()
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(0, 0, 0, 0)
+        t = QLabel(title)
+        f = t.font(); f.setPointSize(14); f.setBold(True); t.setFont(f)
+        hl.addWidget(t)
+        hl.addStretch(1)
+        if self._arrange_mode:
+            hint = QLabel("用 ← → 调整工具位置,顺序自动保存")
+            hint.setStyleSheet(f"color: {TEXT_DIM}; font-size: 12px;")
+            hl.addWidget(hint)
+            btn = QPushButton("✔ 完成排版")
+            btn.setProperty("kind", "ok")
+        else:
+            btn = QPushButton("↕ 排版")
+            btn.setProperty("kind", "dim")
+        btn.setFixedWidth(110)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.clicked.connect(self._toggle_arrange)
+        hl.addWidget(btn)
+        lay.addWidget(header)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        container = QWidget()
+        grid = QGridLayout(container)
+        grid.setContentsMargins(0, 0, 8, 0)
+        grid.setSpacing(8)
+        for i in range(4):
+            grid.setColumnStretch(i, 1)
+
+        arrangeable = not reasons
+        for idx, m in enumerate(apps):
+            r, c = divmod(idx, 4)
+            card = ToolCard(m, (reasons or {}).get(m.id, ""),
+                            arrange_mode=self._arrange_mode and arrangeable)
             if self._arrange_mode and arrangeable:
-                mv = ctk.CTkFrame(card, fg_color="transparent")
-                mv.pack(anchor="w", padx=16, pady=(0, 10))
-                self._arrange_btn_zone = mv
-                ctk.CTkButton(mv, text="← 左移", width=70, height=26,
-                              command=lambda mid=m.id: self._move_app(mid, -1)).pack(side="left", padx=(0, 6))
-                ctk.CTkButton(mv, text="右移 →", width=70, height=26,
-                              command=lambda mid=m.id: self._move_app(mid, 1)).pack(side="left")
-            elif reason:
-                ctk.CTkLabel(card, text=f"✓ {reason}", font=ctk.CTkFont(size=10),
-                             text_color="#5cbf7a", anchor="w").pack(anchor="w", padx=16, pady=(0, 10))
+                card.clicked.connect(lambda aid: self._move_app(aid, -1))
+                card.right_clicked.connect(lambda aid: self._move_app(aid, 1))
             else:
-                ctk.CTkLabel(card, text=f"v{m.version}", font=ctk.CTkFont(size=10),
-                             text_color="#5c6474", anchor="w").pack(anchor="w", padx=16, pady=(0, 10))
+                card.clicked.connect(self._launch)
+            grid.addWidget(card, r, c)
+        grid.setRowStretch(len(apps) // 4 + 1, 1)
 
-            _wire(card)  # 所有子控件创建完成后再统一绑定
+        if not apps:
+            empty = QLabel("暂无工具。点侧边栏「🧩 插件管理」安装第三方工具,\n"
+                           "或在 main.py 的 BUILTIN_APPS 中注册内置工具。")
+            empty.setStyleSheet(f"color: {TEXT_DIM};")
+            empty.setAlignment(Qt.AlignCenter)
+            grid.addWidget(empty, 0, 0, 1, 4)
 
-        def _launch(self, app_id: str):
+        scroll.setWidget(container)
+        lay.addWidget(scroll, 1)
+        return page
+
+    def _toggle_arrange(self):
+        self._arrange_mode = not self._arrange_mode
+        self._refresh_current_view()
+
+    def _move_app(self, app_id: str, delta: int):
+        if self.registry.move_app(app_id, delta):
+            self.search_engine.update(self.registry.all())
+            self._refresh_current_view()
+
+    def _refresh_current_view(self):
+        """按当前搜索框内容重渲染(排版切换/移动卡片后调用)。"""
+        if self.search_box.text().strip():
+            self._do_search()
+        else:
+            self._set_page(self._build_cards_page("全部工具", self.registry.all()))
+
+    # ---------- 工具启动 ----------
+    def _launch(self, app_id: str):
+        page = self._app_pages.get(app_id)
+        if page is None:
             try:
                 app = self.registry.launch(app_id)
             except Exception as e:
                 self._toast(f"启动失败: {e}")
                 return
-            self._clear_content()
-            self.content.grid_forget()
-            self.tool_host.grid(row=1, column=0, sticky="nsew", padx=8, pady=(4, 8))
+            page = self._make_tool_page(app)
+            self._app_pages[app_id] = page
+            self._launched_apps.append(app)
+        self._set_page(page)
 
-            bar = ctk.CTkFrame(self.tool_host, fg_color="transparent")
-            bar.pack(fill="x", padx=8, pady=(4, 6))
-            m = app.manifest
-            ctk.CTkLabel(bar, text=f"{m.icon} {m.name}", font=ctk.CTkFont(size=15, weight="bold")).pack(side="left")
-            ctk.CTkButton(bar, text="← 返回", width=80, fg_color="#2a2f3a",
-                          hover_color="#3a4150", command=self._show_home).pack(side="right")
+    def _make_tool_page(self, app) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
 
-            body = ctk.CTkFrame(self.tool_host, fg_color="transparent")
-            body.pack(fill="both", expand=True)
-            app.build(body)
-            self._current_app = app
+        bar = QWidget()
+        bl = QHBoxLayout(bar)
+        bl.setContentsMargins(0, 0, 0, 0)
+        m = app.manifest
+        t = QLabel(f"{m.icon} {m.name}")
+        f = t.font(); f.setPointSize(13); f.setBold(True); t.setFont(f)
+        bl.addWidget(t)
+        bl.addStretch(1)
+        back = QPushButton("← 返回")
+        back.setProperty("kind", "dim")
+        back.setFixedWidth(90)
+        back.setCursor(Qt.PointingHandCursor)
+        back.clicked.connect(self._show_home)
+        bl.addWidget(back)
+        lay.addWidget(bar)
 
-        # ---------- 插件管理页 ----------
-        def _show_plugins_page(self):
-            self._clear_content()
-            ctk.CTkLabel(self.content, text="🧩 插件管理", anchor="w",
-                         font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="ew", columnspan=2)
+        body = QWidget()
+        lay.addWidget(body, 1)
+        app.build(body)
+        return page
 
-            intro = ctk.CTkFrame(self.content, corner_radius=12, fg_color="#1e222c")
-            intro.grid(row=1, column=0, sticky="ew", columnspan=2, pady=10)
-            ctk.CTkLabel(intro, anchor="w", justify="left", text_color="#9aa3b5",
-                         font=ctk.CTkFont(size=12),
-                         text=("安装第三方工具:把插件 .py 文件放进插件目录,点「扫描安装」即可。\n"
-                               f"插件目录:{self.registry.plugins_dir}\n"
-                               "开发文档:仓库 docs/PLUGIN_GUIDE.md")).pack(padx=16, pady=12, anchor="w")
+    # ---------- 插件管理页 ----------
+    def _show_plugins_page(self):
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
 
-            btns = ctk.CTkFrame(self.content, fg_color="transparent")
-            btns.grid(row=2, column=0, sticky="w", columnspan=2, pady=(0, 10))
-            ctk.CTkButton(btns, text="📂 打开插件目录", width=140,
-                          command=self._open_plugins_dir).pack(side="left", padx=(0, 8))
-            ctk.CTkButton(btns, text="🔄 扫描安装", width=110,
-                          command=self._rescan_plugins).pack(side="left", padx=(0, 8))
-            ctk.CTkButton(btns, text="📄 生成插件模板", width=130, fg_color="#2a2f3a",
-                          hover_color="#3a4150",
-                          command=self._make_plugin_template).pack(side="left")
+        t = QLabel("🧩 插件管理")
+        f = t.font(); f.setPointSize(14); f.setBold(True); t.setFont(f)
+        lay.addWidget(t)
 
-            # 上次扫描报告
-            rep = self._plugin_report
-            msgs = []
-            if rep.get("added"):   msgs.append("新装: " + ", ".join(rep["added"]))
-            if rep.get("updated"): msgs.append("更新: " + ", ".join(rep["updated"]))
-            if rep.get("removed"): msgs.append("已移除: " + ", ".join(rep["removed"]))
-            if rep.get("errors"):  msgs.append("⚠ " + " | ".join(rep["errors"]))
-            if msgs:
-                ctk.CTkLabel(self.content, text="  ".join(msgs), anchor="w",
-                             font=ctk.CTkFont(size=12), text_color="#e8a54b").grid(
-                    row=3, column=0, sticky="ew", columnspan=2, pady=(0, 6))
+        intro = QFrame()
+        intro.setObjectName("panel")
+        il = QVBoxLayout(intro)
+        il.setContentsMargins(16, 12, 16, 12)
+        txt = QLabel("安装第三方工具:把插件 .py 文件放进插件目录,点「扫描安装」即可。\n"
+                     f"插件目录:{self.registry.plugins_dir}\n"
+                     "开发文档:仓库 docs/PLUGIN_GUIDE.md")
+        txt.setStyleSheet(f"color: {TEXT_MID}; font-size: 12px;")
+        il.addWidget(txt)
+        lay.addWidget(intro)
 
-            # 已安装插件列表
-            plugins = [m for m in self.registry.all() if m.source == "plugin"]
-            table = ctk.CTkFrame(self.content, corner_radius=12, fg_color="#1e222c")
-            table.grid(row=4, column=0, sticky="nsew", columnspan=2)
-            self.content.grid_rowconfigure(4, weight=1)
-            if not plugins:
-                ctk.CTkLabel(table, text="尚未安装任何插件",
-                             text_color="#5c6474").pack(pady=30)
-            else:
-                for i, m in enumerate(plugins):
-                    row = ctk.CTkFrame(table, fg_color="transparent")
-                    row.pack(fill="x", padx=14, pady=4)
-                    ctk.CTkLabel(row, text=f"{m.icon} {m.name}",
-                                 font=ctk.CTkFont(size=13, weight="bold"),
-                                 width=140, anchor="w").pack(side="left")
-                    ctk.CTkLabel(row, text=f"v{m.version} · {m.category}",
-                                 text_color="#8a93a6", width=110, anchor="w").pack(side="left")
-                    ctk.CTkLabel(row, text=m.path, text_color="#5c6474",
-                                 font=ctk.CTkFont(size=10), anchor="w").pack(side="left", fill="x", expand=True)
-                    ctk.CTkButton(row, text="卸载", width=60, height=26,
-                                  fg_color="#5a2730", hover_color="#7a3540",
-                                  command=lambda mm=m: self._uninstall_plugin(mm)).pack(side="right")
+        btns = QWidget()
+        bl = QHBoxLayout(btns)
+        bl.setContentsMargins(0, 0, 0, 0)
+        for text, slot, kind in (
+                ("📂 打开插件目录", self._open_plugins_dir, None),
+                ("🔄 扫描安装", self._rescan_plugins, None),
+                ("📄 生成插件模板", self._make_plugin_template, "dim")):
+            b = QPushButton(text)
+            if kind:
+                b.setProperty("kind", kind)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(slot)
+            bl.addWidget(b)
+        bl.addStretch(1)
+        lay.addWidget(btns)
 
-        def _open_plugins_dir(self):
-            import subprocess
-            d = str(self.registry.plugins_dir)
-            if sys.platform == "win32":
-                os.startfile(d)  # type: ignore[attr-defined]
-            elif sys.platform == "darwin":
-                subprocess.Popen(["open", d])
-            else:
-                subprocess.Popen(["xdg-open", d])
+        # 上次扫描报告
+        rep = self._plugin_report
+        msgs = []
+        if rep.get("added"):   msgs.append("新装: " + ", ".join(rep["added"]))
+        if rep.get("updated"): msgs.append("更新: " + ", ".join(rep["updated"]))
+        if rep.get("removed"): msgs.append("已移除: " + ", ".join(rep["removed"]))
+        if rep.get("errors"):  msgs.append("⚠ " + " | ".join(rep["errors"]))
+        if msgs:
+            rep_lab = QLabel("  ".join(msgs))
+            rep_lab.setStyleSheet(f"color: {ORANGE}; font-size: 12px;")
+            rep_lab.setWordWrap(True)
+            lay.addWidget(rep_lab)
 
-        def _rescan_plugins(self):
-            self._plugin_report = self.registry.sync_plugins()
-            self.search_engine.update(self.registry.all())
-            self._rebuild_sidebar()
-            self._show_plugins_page()
-            added, errs = self._plugin_report["added"], self._plugin_report["errors"]
-            if added:
-                self._toast(f"✅ 已安装 {len(added)} 个插件: {', '.join(added)}")
-            elif errs:
-                self._toast("⚠ 部分插件加载失败,详见页面提示")
+        # 已安装插件列表
+        plugins = [m for m in self.registry.all() if m.source == "plugin"]
+        table = QFrame()
+        table.setObjectName("panel")
+        tl = QVBoxLayout(table)
+        tl.setContentsMargins(14, 10, 14, 10)
+        if not plugins:
+            empty = QLabel("尚未安装任何插件")
+            empty.setStyleSheet("color: #5c6474;")
+            empty.setAlignment(Qt.AlignCenter)
+            tl.addWidget(empty)
+            tl.addStretch(1)
+        else:
+            for m in plugins:
+                row = QWidget()
+                row.setStyleSheet("background: transparent;")
+                rl = QHBoxLayout(row)
+                rl.setContentsMargins(0, 4, 0, 4)
+                n = QLabel(f"{m.icon} {m.name}")
+                f = n.font(); f.setBold(True); n.setFont(f)
+                n.setFixedWidth(150)
+                v = QLabel(f"v{m.version} · {m.category}")
+                v.setStyleSheet(f"color: {TEXT_DIM};")
+                v.setFixedWidth(120)
+                p = QLabel(str(m.path))
+                p.setStyleSheet("color: #5c6474; font-size: 10px;")
+                un = QPushButton("卸载")
+                un.setProperty("kind", "danger")
+                un.setFixedSize(60, 26)
+                un.setCursor(Qt.PointingHandCursor)
+                un.clicked.connect(lambda _=False, mm=m: self._uninstall_plugin(mm))
+                rl.addWidget(n)
+                rl.addWidget(v)
+                rl.addWidget(p, 1)
+                rl.addWidget(un)
+                tl.addWidget(row)
+            tl.addStretch(1)
+        lay.addWidget(table, 1)
+        self._set_page(page)
 
-        def _make_plugin_template(self):
-            """在插件目录生成一个可直接运行的示例插件,方便照着改。"""
-            target = self.registry.plugins_dir / "hello_plugin.py"
-            if target.exists():
-                self._toast("模板已存在: hello_plugin.py")
-                self._open_plugins_dir()
-                return
-            target.write_text(PLUGIN_TEMPLATE, "utf-8")
-            self._toast("已生成模板 hello_plugin.py,点「扫描安装」试试")
+    def _open_plugins_dir(self):
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.registry.plugins_dir)))
 
-        def _uninstall_plugin(self, m: Manifest):
-            from tkinter import messagebox
-            if not messagebox.askyesno("卸载插件",
-                                       f"卸载「{m.name}」?\n将从注册表移除。插件文件和数据目录保留,\n"
-                                       f"如要彻底删除,请手动删文件和在环境管理页删数据。"):
-                return
-            self.registry.unregister(m.id)
-            self.search_engine.update(self.registry.all())
-            self._rebuild_sidebar()
-            self._show_plugins_page()
-            self._toast(f"已卸载 {m.name}")
+    def _rescan_plugins(self):
+        self._plugin_report = self.registry.sync_plugins()
+        self.search_engine.update(self.registry.all())
+        self._rebuild_sidebar()
+        self._show_plugins_page()
+        added, errs = self._plugin_report["added"], self._plugin_report["errors"]
+        if added:
+            self._toast(f"✅ 已安装 {len(added)} 个插件: {', '.join(added)}")
+        elif errs:
+            self._toast("⚠ 部分插件加载失败,详见页面提示")
 
-        def _show_env_page(self):
-            self._clear_content()
-            ctk.CTkLabel(self.content, text="🗂 环境管理", anchor="w",
-                         font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="ew", columnspan=2)
+    def _make_plugin_template(self):
+        """在插件目录生成一个可直接运行的示例插件,方便照着改。"""
+        target = self.registry.plugins_dir / "hello_plugin.py"
+        if target.exists():
+            self._toast("模板已存在: hello_plugin.py")
+            self._open_plugins_dir()
+            return
+        target.write_text(PLUGIN_TEMPLATE, "utf-8")
+        self._toast("已生成模板 hello_plugin.py,点「扫描安装」试试")
 
-            info = ctk.CTkFrame(self.content, corner_radius=12, fg_color="#1e222c")
-            info.grid(row=1, column=0, sticky="nsew", columnspan=2, pady=10)
-            rows = [
-                ("数据根目录", str(self.env.root)),
-                ("注册表", str(self.env.file if hasattr(self.env, 'file') else self.registry.file)),
-                ("已注册 App", f"{len(self.registry.all())} 个"),
-                ("磁盘占用", human_size(self.env.total_usage_bytes())),
-            ]
-            for i, (k, v) in enumerate(rows):
-                ctk.CTkLabel(info, text=k, text_color="#8a93a6", anchor="w").grid(row=i, column=0, sticky="w", padx=16, pady=6)
-                ctk.CTkLabel(info, text=v, anchor="w", font=ctk.CTkFont(size=12)).grid(row=i, column=1, sticky="w", padx=8, pady=6)
-            info.grid_columnconfigure(1, weight=1)
+    def _uninstall_plugin(self, m: Manifest):
+        ret = QMessageBox.question(
+            self, "卸载插件",
+            f"卸载「{m.name}」?\n将从注册表移除。插件文件和数据目录保留,\n"
+            f"如要彻底删除,请手动删文件和在环境管理页删数据。",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if ret != QMessageBox.Yes:
+            return
+        self.registry.unregister(m.id)
+        self.search_engine.update(self.registry.all())
+        self._app_pages.pop(m.id, None)
+        self._rebuild_sidebar()
+        self._show_plugins_page()
+        self._toast(f"已卸载 {m.name}")
 
-            # 更改数据目录
-            chg = ctk.CTkFrame(info, fg_color="transparent")
-            chg.grid(row=len(rows), column=0, columnspan=2, sticky="w", padx=10, pady=(4, 10))
-            ctk.CTkButton(chg, text="📁 更改数据目录…", width=150,
-                          command=self._change_data_root).pack(side="left", padx=6)
-            ctk.CTkButton(chg, text="恢复默认位置", width=110, fg_color="#2a2f3a",
-                          hover_color="#3a4150",
-                          command=lambda: self._apply_new_root(main_env_default_root())).pack(side="left", padx=6)
-            ctk.CTkLabel(chg, text="更改后旧数据自动搬迁(可跨盘)", font=ctk.CTkFont(size=11),
-                         text_color="#5c6474").pack(side="left", padx=10)
+    # ---------- 环境管理页 ----------
+    def _show_env_page(self):
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
 
-            table = ctk.CTkFrame(self.content, corner_radius=12, fg_color="#1e222c")
-            table.grid(row=2, column=0, sticky="nsew", columnspan=2)
-            self.content.grid_rowconfigure(2, weight=1)
-            heads = ("App", "数据目录", "占用", "操作")
-            for c, h in enumerate(heads):
-                ctk.CTkLabel(table, text=h, font=ctk.CTkFont(size=13, weight="bold"),
-                             text_color="#8a93a6").grid(row=0, column=c, sticky="w", padx=14, pady=(12, 6))
-            for r, m in enumerate(self.registry.all(), start=1):
-                appenv = self.env.environment_for(m.id)
-                ctk.CTkLabel(table, text=f"{m.icon} {m.name}").grid(row=r, column=0, sticky="w", padx=14, pady=4)
-                ctk.CTkLabel(table, text=str(appenv.base), text_color="#9aa3b5",
-                             font=ctk.CTkFont(size=11)).grid(row=r, column=1, sticky="w", padx=14)
-                ctk.CTkLabel(table, text=human_size(appenv.usage_bytes())).grid(row=r, column=2, sticky="w", padx=14)
-                btns = ctk.CTkFrame(table, fg_color="transparent")
-                btns.grid(row=r, column=3, sticky="w", padx=14)
-                ctk.CTkButton(btns, text="清缓存", width=70, height=26, fg_color="#2a2f3a",
-                              hover_color="#3a4150",
-                              command=lambda a=m.id: self._clear_cache(a)).pack(side="left", padx=3)
-                ctk.CTkButton(btns, text="删数据", width=70, height=26, fg_color="#5a2730",
-                              hover_color="#7a3540",
-                              command=lambda a=m.id: self._remove_data(a)).pack(side="left", padx=3)
+        t = QLabel("🗂 环境管理")
+        f = t.font(); f.setPointSize(14); f.setBold(True); t.setFont(f)
+        lay.addWidget(t)
 
-        def _clear_cache(self, app_id: str):
-            freed = self.env.environment_for(app_id).clear_cache()
-            self._toast(f"{app_id} 缓存已清理,释放 {human_size(freed)}")
-            self._show_env_page()
+        info = QFrame()
+        info.setObjectName("panel")
+        ig = QGridLayout(info)
+        ig.setContentsMargins(16, 12, 16, 12)
+        ig.setColumnStretch(1, 1)
+        rows = [
+            ("数据根目录", str(self.env.root)),
+            ("注册表", str(self.registry.file)),
+            ("已注册 App", f"{len(self.registry.all())} 个"),
+            ("磁盘占用", human_size(self.env.total_usage_bytes())),
+        ]
+        for i, (k, v) in enumerate(rows):
+            kl = QLabel(k)
+            kl.setStyleSheet(f"color: {TEXT_DIM};")
+            vl = QLabel(v)
+            vl.setStyleSheet("font-size: 12px;")
+            vl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            ig.addWidget(kl, i, 0, Qt.AlignLeft)
+            ig.addWidget(vl, i, 1, Qt.AlignLeft)
 
-        # ---------- 更改数据目录 ----------
-        def _change_data_root(self):
-            from tkinter import filedialog, messagebox
-            path = filedialog.askdirectory(title="选择新的数据目录",
-                                           initialdir=str(self.env.root.parent))
-            if not path:
-                return
-            if not messagebox.askyesno("确认更改",
-                                       f"数据目录将更改为:\n{path}\n\n旧数据会自动搬迁过去,继续吗?"):
-                return
+        chg = QWidget()
+        chg.setStyleSheet("background: transparent;")
+        cl = QHBoxLayout(chg)
+        cl.setContentsMargins(0, 4, 0, 0)
+        b1 = QPushButton("📁 更改数据目录…")
+        b1.setFixedWidth(150)
+        b1.setCursor(Qt.PointingHandCursor)
+        b1.clicked.connect(self._change_data_root)
+        b2 = QPushButton("恢复默认位置")
+        b2.setProperty("kind", "dim")
+        b2.setFixedWidth(110)
+        b2.setCursor(Qt.PointingHandCursor)
+        b2.clicked.connect(lambda: self._apply_new_root(main_env_default_root()))
+        hint = QLabel("更改后旧数据自动搬迁(可跨盘)")
+        hint.setStyleSheet("color: #5c6474; font-size: 11px;")
+        cl.addWidget(b1)
+        cl.addWidget(b2)
+        cl.addWidget(hint)
+        cl.addStretch(1)
+        ig.addWidget(chg, len(rows), 0, 1, 2)
+        lay.addWidget(info)
+
+        # 各 App 数据表
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        table = QFrame()
+        table.setObjectName("panel")
+        tg = QGridLayout(table)
+        tg.setContentsMargins(14, 12, 14, 12)
+        tg.setColumnStretch(1, 1)
+        heads = ("App", "数据目录", "占用", "操作")
+        for c, h in enumerate(heads):
+            hl = QLabel(h)
+            f = hl.font(); f.setBold(True); hl.setFont(f)
+            hl.setStyleSheet(f"color: {TEXT_DIM};")
+            tg.addWidget(hl, 0, c)
+        for r, m in enumerate(self.registry.all(), start=1):
+            appenv = self.env.environment_for(m.id)
+            tg.addWidget(QLabel(f"{m.icon} {m.name}"), r, 0)
+            pl = QLabel(str(appenv.base))
+            pl.setStyleSheet(f"color: {TEXT_MID}; font-size: 11px;")
+            tg.addWidget(pl, r, 1)
+            tg.addWidget(QLabel(human_size(appenv.usage_bytes())), r, 2)
+            btns = QWidget()
+            btns.setStyleSheet("background: transparent;")
+            bl = QHBoxLayout(btns)
+            bl.setContentsMargins(0, 0, 0, 0)
+            bl.setSpacing(6)
+            cb = QPushButton("清缓存")
+            cb.setProperty("kind", "dim")
+            cb.setFixedSize(70, 26)
+            cb.setCursor(Qt.PointingHandCursor)
+            cb.clicked.connect(lambda _=False, a=m.id: self._clear_cache(a))
+            db = QPushButton("删数据")
+            db.setProperty("kind", "danger")
+            db.setFixedSize(70, 26)
+            db.setCursor(Qt.PointingHandCursor)
+            db.clicked.connect(lambda _=False, a=m.id: self._remove_data(a))
+            bl.addWidget(cb)
+            bl.addWidget(db)
+            tg.addWidget(btns, r, 3)
+        scroll.setWidget(table)
+        lay.addWidget(scroll, 1)
+        self._set_page(page)
+
+    def _clear_cache(self, app_id: str):
+        freed = self.env.environment_for(app_id).clear_cache()
+        self._toast(f"{app_id} 缓存已清理,释放 {human_size(freed)}")
+        self._show_env_page()
+
+    def _change_data_root(self):
+        path = QFileDialog.getExistingDirectory(
+            self, "选择新的数据目录", str(self.env.root.parent))
+        if not path:
+            return
+        ret = QMessageBox.question(
+            self, "确认更改",
+            f"数据目录将更改为:\n{path}\n\n旧数据会自动搬迁过去,继续吗?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if ret == QMessageBox.Yes:
             self._apply_new_root(path)
 
-        def _apply_new_root(self, new_root):
-            from pathlib import Path
-            try:
-                self.env.change_root(new_root)
-            except OSError as e:
-                self._toast(f"❌ {e}")
-                return
-            # 重建注册表与搜索引擎(指向新 root)
-            self.registry = Registry(self.env)
-            self._plugin_report = seed_registry(self.registry)
-            self.search_engine.update(self.registry.all())
-            self._rebuild_sidebar()
-            self._toast(f"✅ 数据目录已更改为 {Path(new_root)}")
+    def _apply_new_root(self, new_root):
+        try:
+            self.env.change_root(new_root)
+        except OSError as e:
+            self._toast(f"❌ {e}")
+            return
+        # 重建注册表与搜索引擎(指向新 root)
+        self.registry = Registry(self.env)
+        self._plugin_report = seed_registry(self.registry)
+        self.search_engine.update(self.registry.all())
+        self._app_pages.clear()
+        self._launched_apps.clear()
+        self._rebuild_sidebar()
+        self._toast(f"✅ 数据目录已更改为 {Path(new_root)}")
+        self._show_env_page()
+
+    def _remove_data(self, app_id: str):
+        ret = QMessageBox.question(
+            self, "确认",
+            f"彻底删除 {app_id} 的所有数据?\n(注册信息保留,数据不可恢复)",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if ret == QMessageBox.Yes:
+            self.env.remove_app_data(app_id)
             self._show_env_page()
 
-        def _remove_data(self, app_id: str):
-            from tkinter import messagebox
-            if messagebox.askyesno("确认", f"彻底删除 {app_id} 的所有数据?\n(注册信息保留,数据不可恢复)"):
-                self.env.remove_app_data(app_id)
-                self._show_env_page()
+    # ---------- Toast ----------
+    def _toast(self, msg: str):
+        t = QLabel(msg, self)
+        t.setObjectName("toast")
+        t.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        t.adjustSize()
+        t.move((self.width() - t.width()) // 2, self.height() - t.height() - 50)
+        t.show()
+        t.raise_()
+        QTimer.singleShot(2600, t.deleteLater)
 
-        def _toast(self, msg: str):
-            t = ctk.CTkLabel(self, text=msg, corner_radius=8, fg_color="#2a2f3a",
-                             font=ctk.CTkFont(size=13), padx=14, pady=8)
-            t.place(relx=0.5, y=self.winfo_height() - 60, anchor="s")
-            t.after(2600, t.destroy)
-
-        def destroy(self):
-            app = getattr(self, "_current_app", None)
-            if app:
-                try:
-                    app.on_close()
-                except Exception:
-                    pass
-            super().destroy()
-else:
-    # 无 customtkinter 时的极简降级界面(保证可用)
-    class ToolboxApp(tk.Tk):
-        def __init__(self):
-            super().__init__()
-            self.title("Toolbox 工具箱 (基础模式: pip install customtkinter 获得现代界面)")
-            self.geometry("760x520")
-            self.env = EnvManager.instance()
-            self.registry = Registry(self.env)
-            seed_registry(self.registry)
-            self.search_engine = SearchEngine(self.registry.all())
-
-            self.search_var = tk.StringVar()
-            tk.Entry(self, textvariable=self.search_var, width=60).pack(padx=12, pady=10, fill="x")
-            self.search_var.trace_add("write", lambda *_: self.refresh())
-            self.list = tk.Listbox(self, font=("Microsoft YaHei UI", 12))
-            self.list.pack(fill="both", expand=True, padx=12, pady=(0, 12))
-            self.list.bind("<Double-1>", lambda _e: self.launch())
-            self.refresh()
-
-        def refresh(self):
-            self.list.delete(0, "end")
-            q = self.search_var.get()
-            results = self.search_engine.search(q) if q.strip() else \
-                [type("R", (), {"manifest": m})() for m in self.registry.all()]
-            for r in results:
-                m = r.manifest
-                self.list.insert("end", f"{m.icon}  {m.name}  [{m.category}]  — {m.description[:40]}")
-
-        def launch(self):
-            sel = self.list.curselection()
-            if not sel:
-                return
-            apps = self.registry.all()
-            m = apps[sel[0]]
-            win = tk.Toplevel(self)
-            win.title(f"{m.icon} {m.name}")
-            win.geometry("640x460")
+    # ---------- 关闭 ----------
+    def closeEvent(self, ev):
+        for app in self._launched_apps:
             try:
-                app = self.registry.launch(m.id)
-                app.build(win)
-            except Exception as e:
-                tk.Label(win, text=f"启动失败: {e}").pack(pady=20)
+                app.on_close()
+            except Exception:
+                pass
+        super().closeEvent(ev)
+
+
+def apply_dark_palette(app) -> None:
+    """给 QApplication 设深色调色板。
+
+    QSS 管不到 QComboBox 的下拉弹出层(原生弹出窗口不吃父级样式表),
+    Fusion 风格下弹出层颜色取自调色板 —— 不设就会白底灰字看不清。
+    """
+    from PySide6.QtGui import QColor, QPalette
+    pal = QPalette()
+    pal.setColor(QPalette.Window, QColor(MAIN_BG))
+    pal.setColor(QPalette.WindowText, QColor(TEXT_MAIN))
+    pal.setColor(QPalette.Base, QColor(CARD_BG))
+    pal.setColor(QPalette.AlternateBase, QColor(CARD_HOVER))
+    pal.setColor(QPalette.Text, QColor(TEXT_MAIN))
+    pal.setColor(QPalette.Button, QColor(CARD_BG))
+    pal.setColor(QPalette.ButtonText, QColor(TEXT_MAIN))
+    pal.setColor(QPalette.Highlight, QColor(ACCENT))
+    pal.setColor(QPalette.HighlightedText, QColor("white"))
+    pal.setColor(QPalette.ToolTipBase, QColor(CARD_BG))
+    pal.setColor(QPalette.ToolTipText, QColor(TEXT_MAIN))
+    pal.setColor(QPalette.PlaceholderText, QColor(TEXT_DIM))
+    app.setPalette(pal)
 
 
 def main():
-    app = ToolboxApp()
-    app.mainloop()
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    apply_dark_palette(app)
+    # 窗口/任务栏图标:PyInstaller onefile 资源解包在 sys._MEIPASS,源码运行在项目根
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    ico = base / "toolbox.ico"
+    if ico.exists():
+        app.setWindowIcon(QIcon(str(ico)))
+    font = QFont("Microsoft YaHei UI", 10)
+    app.setFont(font)
+    win = ToolboxWindow()
+    win.show()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

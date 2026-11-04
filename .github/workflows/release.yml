@@ -25,7 +25,8 @@ jobs:
       - name: Build exe
         run: >
           pyinstaller --noconfirm --onefile --windowed --name Toolbox
-          --collect-all customtkinter
+          --icon toolbox.ico
+          --add-data "toolbox.ico;."
           --collect-submodules apps
           --collect-submodules core
           --hidden-import sounddevice
