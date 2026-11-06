@@ -24,7 +24,7 @@ jobs:
 
       - name: Build exe
         run: >
-          pyinstaller --noconfirm --onefile --windowed --name Toolbox
+          python -m PyInstaller --noconfirm --onefile --windowed --name Toolbox
           --icon toolbox.ico
           --add-data "toolbox.ico;."
           --collect-submodules apps
@@ -33,6 +33,14 @@ jobs:
           --hidden-import numpy
           --hidden-import rapidfuzz
           main.py
+
+      - name: Verify apps/core bundled (guards against silent --collect-submodules misses)
+        # Must use `python -m PyInstaller`, not the bare `pyinstaller` console
+        # script: the console script does not put cwd on sys.path, so
+        # --collect-submodules apps silently collects nothing and the shipped
+        # exe dies at startup with "No module named apps".
+        run: |
+          python -c "import sys; from PyInstaller.archive.readers import CArchiveReader; r=CArchiveReader('dist/Toolbox.exe'); pyz=[n for n in r.toc if n.upper().startswith('PYZ')]; a=r.open_embedded_archive(pyz[0]); toc=a.toc; toc=getattr(toc,'toc',toc); names=set(toc.keys()); missing=[m for m in ('apps','apps.audio_player','apps.daily_tasks','apps.demo_notepad','core.registry') if m not in names]; print(sorted(n for n in names if n.split('.')[0] in ('apps','core'))); sys.exit('MISSING: '+repr(missing) if missing else 0)"
 
       - name: Create Release and upload assets
         uses: softprops/action-gh-release@v2

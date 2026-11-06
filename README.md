@@ -28,7 +28,7 @@
 
 到 [Releases](https://github.com/getabear/Toolbox/releases) 页面下载 `Toolbox.exe`,双击运行,无需安装 Python。
 
-> Releases 由 GitHub Actions 自动构建:推送 `v*` 标签即在 windows-latest 上打包 exe 并发布(见 `.github/workflows/release.yml`)。
+> Releases 由 GitHub Actions 自动构建:推送 `v*` 标签即在 windows-latest 上打包 exe 并发布(见 `.github/workflows/release.yml`)。CI 构建命令必须用 `python -m PyInstaller` 而非裸 `pyinstaller` 命令——后者不把当前目录加入 sys.path,`--collect-submodules apps` 会静默收集为空,打出的 exe 启动即报 `No module named apps`;workflow 里已加构建后自检步骤兜底。注意 v0.2.2 / v0.3.0 的 Release exe 受此问题影响,请下载更新版本。
 
 ### 方式二:源码运行
 
